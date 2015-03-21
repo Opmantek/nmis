@@ -1,0 +1,58 @@
+#
+#  Copyright Opmantek Limited (www.opmantek.com)
+#  
+#  ALL CODE MODIFICATIONS MUST BE SENT TO CODE@OPMANTEK.COM
+#  
+#  This file is part of Network Management Information System ("NMIS").
+#  
+#  NMIS is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#  
+#  NMIS is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#  
+#  You should have received a copy of the GNU General Public License
+#  along with NMIS (most likely in a file named LICENSE).  
+#  If not, see <http://www.gnu.org/licenses/>
+#  
+#  For further information on NMIS or for a license other than GPL please see
+#  www.opmantek.com or email contact@opmantek.com 
+#  
+#  User group details:
+#  http://support.opmantek.com/users/
+#  
+# *****************************************************************************
+
+use NMIS;
+use Auth;
+
+my $C = loadConfTable();
+
+# variables used for the security mods
+my $AU = Auth->new(conf => $C);  # Auth::new will reap init values from NMIS::config
+# Calling program needs to do auth, then set the ENVIRONMENT before this is called.
+$AU->SetUser($ENV{'NMIS_USER'});
+
+my @privs = ();
+my $PM = loadTable(dir=>'conf',name=>'PrivMap');
+# I assume a natural order: administrator = 0 (highest priv) and guest = 6 (lowest priv)
+foreach (sorthash( $PM,['level'],'fwd')) { push @privs,$_ ;}
+
+%hash = (
+			Access => [
+				{ name => { header => 'Name',display => 'key,header,text', value => [""] }},
+				{ group => { header => 'Group',display => 'header,popup', value => ["access","button","tool"] }},
+				{ descr => { header => 'Description',display => 'header,text', value => [""] }},
+				{ level0 => { header => $privs[0],display => 'header,popup', value => ["1","0"] }},
+				{ level1 => { header => $privs[1],display => 'header,popup', value => ["0","1"] }},
+				{ level2 => { header => $privs[2],display => 'header,popup', value => ["0","1"] }},
+				{ level3 => { header => $privs[3],display => 'header,popup', value => ["0","1"] }},
+				{ level4 => { header => $privs[4],display => 'header,popup', value => ["0","1"] }},
+				{ level5 => { header => $privs[5],display => 'header,popup', value => ["0","1"] }}
+			]
+);
+
