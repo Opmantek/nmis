@@ -31,6 +31,7 @@
 # TODO:
 # * support for completely unattended install (silencing confirmations)
 # e.g. install.pl site=/usr/local/nmis8 fping=/usr/local/sbin/fping cpan=true
+use 5.10.1;
 
 # Load the necessary libraries
 use FindBin;
@@ -87,7 +88,20 @@ else
 ###************************************************************************###
 printBanner("NMIS Installation Script");
 my $hostname = `hostname -f`; chomp $hostname;
-logInstall("Installation on host '$hostname' started at ".scalar localtime(time));
+
+my $nmisversion;
+open(G, "./lib/NMIS.pm");
+for  my $line (<G>)
+{
+	if ($line =~ /^\$VERSION\s*=\s*"(.+)";\s*$/)
+	{
+		$nmisversion = $1;
+		last;
+	}
+}
+close G;
+logInstall("Installation of NMIS $nmisversion on host '$hostname' started at ".scalar localtime(time));
+
 
 # there are some slight but annoying differences
 my $osflavour;
@@ -153,7 +167,7 @@ libpango1.0-dev libxml2 libxml2-dev libgd-gd2-perl libnet-ssleay-perl
 libcrypt-ssleay-perl apache2 fping snmp snmpd libnet-snmp-perl
 libcrypt-passwdmd5-perl libjson-xs-perl libnet-dns-perl
 libio-socket-ssl-perl libwww-perl libnet-smtp-ssl-perl libnet-smtps-perl
-libcrypt-unixcrypt-perl libdata-uuid-perl libproc-processtable-perl
+libcrypt-unixcrypt-perl libuuid-tiny-perl libproc-processtable-perl
 libnet-ldap-perl libnet-snpp-perl libdbi-perl libtime-modules-perl
 libsoap-lite-perl libauthen-simple-radius-perl libauthen-tacacsplus-perl
 libauthen-sasl-perl rrdtool librrds-perl libsys-syslog-perl libtest-deep-perl));
@@ -163,7 +177,7 @@ pango pango-devel glib glib-devel libxml2 libxml2-devel gd gd-devel
 libXpm-devel libXpm openssl openssl-devel net-snmp net-snmp-libs
 net-snmp-utils net-snmp-perl perl-Net-SSLeay perl-JSON-XS httpd fping
 make groff perl-CPAN crontabs dejavu* perl-libwww-perl perl-Net-DNS
-perl-DBI perl-Net-SMTPS perl-Net-SMTP-SSL uuid-perl perl-Time-modules
+perl-DBI perl-Net-SMTPS perl-Net-SMTP-SSL perl-Time-modules
 perl-CGI net-snmp-perl perl-Proc-ProcessTable perl-Authen-SASL
 perl-Crypt-PasswdMD5 perl-Net-SNPP perl-Net-SNMP perl-GD rrdtool
 perl-rrdtool perl-Test-Deep));
@@ -235,13 +249,13 @@ dependency manually before NMIS can operate properly.\n\nHit <Enter> to continue
 
 			echolog("Checking yum repository list, please wait...");
 			my @repos=`yum repolist 2>/dev/null`;
-			if (!grep(/^rpmforge\s+/, @repos))
+			if (!grep(/^\*?rpmforge\s+/, @repos))
 			{
 				echolog("Adding RepoForge Repository for suitable RRDTool version");
 				# centos 6 ships an ancient rrdtool, repoforge-extras has what we're after
 				execPrint("yum -y install http://pkgs.repoforge.org/rpmforge-release/rpmforge-release-0.5.3-1.el$rhver.rf.x86_64.rpm");
 			}
-			if (!grep(/^epel\s+/, @repos) and $rhver == 6)
+			if (!grep(/^\*?epel\s+/, @repos) and $rhver == 6)
 			{
 				echolog("Adding EPEL Repository for glib and Net-SNMP");
 				execPrint("yum -y install http://download.fedoraproject.org/pub/epel/6/i386/epel-release-6-8.noarch.rpm http://pkgs.repoforge.org/rpmforge-release/rpmforge-release-0.5.3-1.el6.rf.x86_64.rpm");
@@ -628,18 +642,32 @@ in your current Common-database configuration file.\n\n");
 		
 		if (input_yn("OK to run rrd migration script?"))
 		{
-			echolog("Performing RRD migration operation...\n");
-			my $error = execPrint("$site/admin/migrate_rrd_locations.pl newlayout=$site/models-install/Common-database.nmis");
-
+			echolog("Running RRD migration script in test mode first...");
+			my $error = execPrint("$site/admin/migrate_rrd_locations.pl newlayout=$site/models-install/Common-database.nmis simulate=true");
 			if ($error)
 			{
-				echolog("Error: RRD migration failed! Please use the rollback script
-listed above to revert to the original status!\nHit <Enter> to continue:\n");
+				echolog("Error: RRD migration script detected problems!
+The RRD migration script could not complete its test run successfully.
+The RRD migration will therefore NOT be performed. 
+
+Please check the installation log and diagnostic output for details.\nHit <Enter> to continue:\n");
 				my $x = <STDIN>;
 			}
 			else
 			{
-				echolog("RRD migration completed successfully.");
+				echolog("Performing the actual RRD migration operation...\n");
+				my $error = execPrint("$site/admin/migrate_rrd_locations.pl newlayout=$site/models-install/Common-database.nmis");
+				
+				if ($error)
+				{
+					echolog("Error: RRD migration failed! Please use the rollback script
+listed above to revert to the original status!\nHit <Enter> to continue:\n");
+					my $x = <STDIN>;
+				}
+				else
+				{
+					echolog("RRD migration completed successfully.");
+				}
 			}
 		}
 		else
@@ -793,9 +821,9 @@ and provides an example/default Cron schedule.
 The installer can install this default schedule in /etc/cron.d/nmis,
 which immediately activates it.
 
-Please note that if you already have an NMIS schedule in your per-user
-root crontab, then you need to decide on using either the system-wide cron 
-files in /etc/cron.d or the per-user crontab but not both!\n\n";
+If you already have NMIS entries in your root crontab, 
+then the installer will comment out all NMIS entries in
+that crontab.\n\n";
 
 my $crongood = (-f "/etc/cron.d/nmis");
 if (input_yn("Do you want the default NMIS Cron schedule\nto be installed in /etc/cron.d/nmis?"))
@@ -805,13 +833,35 @@ if (input_yn("Do you want the default NMIS Cron schedule\nto be installed in /et
 	
 	if (0 == $res>>8)
 	{
+		echolog("Cleaning up old per-user crontab");
+		# now clean up the old per-user cron
+		execPrint("crontab -l > $site/conf/crontab.root");
+		echolog("Old crontab was saved in $site/conf/crontab.root");
+
+		open (F, "$site/conf/crontab.root") or die "cannot read crontab.root: $!\n";
+		my @crondata = <F>;
+		close F;
+		for my $line (@crondata)
+		{
+			$line = "# NMIS8 Cron Config is now in /etc/cron.d/nmis\n" if ($line =~ /^#\s*NMIS8 Config/);
+			$line = "#disabled! ".$line if ($line =~ m!(nmis8?/bin|nmis8?/conf|nmis8?/admin)!);
+		}
+		open (G, "|crontab -") or die "cannot fork to update crontab: $!\n";
+		print G @crondata;
+		close G;
+		echolog("Cleaned-up crontab was installed.");
 		execPrint("mv /tmp/new-nmis-cron /etc/cron.d/nmis");
+
 		print "\nA new default cron was created in /etc/cron.d/nmis, 
-but feel free to adjust it.\n
-If you already have an NMIS schedule in your per-user
-root crontab, then you should remove that using \"crontab -e\".\n\nPlease hit <Enter> to continue:\n";
+but feel free to adjust it.
+
+Any NMIS entries in root's crontab were commented out,
+but a backup of the crontab was saved in $site/cronf/crontab.root.\n\n
+
+Please hit <Enter> to continue:\n";
 		my $x = <STDIN>;
 		$crongood = 1;
+		logInstall("New system crontab was installed in /etc/cron.d/nmis");
 	}
 	else
 	{

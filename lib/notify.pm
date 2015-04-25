@@ -40,7 +40,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 use Exporter;
 use Net::SMTPS;
 use Net::SNPP;
-use Sys::Syslog 0.28;						# older versions cannot set a custom syslog port
+use Sys::Syslog 0.33;						# older versions have problems with custom ports and tcp
 use Sys::Hostname;							# for sys::syslog
 use File::Basename;
 use version 0.77;
@@ -132,6 +132,7 @@ sub sendEmail
 
 	# if dossl isn't on then this just opens a normal unauthed socket
 	my @connargs=($arg{mailserver},
+								Debug => $arg{debug},
 								Port => $arg{serverport},
 								doSSL => $arg{usetls},
 								"Hello" => $arg{hello},
@@ -139,7 +140,7 @@ sub sendEmail
 								SSL_verify_mode => $arg{ssl_verify_mode});
 	my $smtp = Net::SMTPS->new( @connargs );
 		
-	return (0,999,"connection to $arg{mailserver}, port $arg{serverport} failed: $!")
+	return (0,999,"connection to $arg{mailserver}, port $arg{serverport}, ipproto $ipproto, failed: $!")
 			if (!$smtp);
 
 	# auth is done whenever both mail_user and mail_password are both set to non-blank
@@ -243,7 +244,6 @@ sub sendSyslog
 
 
 			# don't bother waiting, especially not with udp
-
 			# sys::syslog has a silly bug: host option is overwritten by "path" for udp and tcp :-/
 			Sys::Syslog::setlogsock({type => $protocol, host => $server,
 
@@ -252,14 +252,24 @@ sub sendSyslog
 			# this creates an rfc3156-compliant hostname + command[pid]: header
 			# note that sys::syslog doesn't fully support rfc5424, as it doesn't
 			# create a version part.
-			openlog(hostname." ".basename($0), "nofatal,pid", $facility);
-			# the nofatal is for not bothering with send failures.
-
-			syslog($priority, $message);
-			closelog;
-			Sys::Syslog::setlogsock([qw(native tcp udp unix pipe stream console)]); 			# reset to defaults
-
-			dbg("syslog $message to $server:$port");
+			# the nofatal option would be for not bothering with send failures, but doesn't quite work :-(
+			eval { openlog(hostname." ".basename($0), "ndelay,pid", $facility); };
+			if (!$@)
+			{
+				dbg("syslog $message to $server:$port");
+				eval { syslog($priority, $message); };
+				if ($@)
+				{
+					logMsg("ERROR: could not send message to syslog server \"$server\", $protocol port $port!");
+				}
+				closelog;
+			}
+			else
+			{
+				logMsg("ERROR: could connect to syslog server \"$server\", $protocol port $port!");
+			}
+			# reset to defaults, for future use
+			Sys::Syslog::setlogsock([qw(native tcp udp unix pipe stream console)]); 			
 		}
 		else 
 		{

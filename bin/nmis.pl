@@ -1256,7 +1256,7 @@ sub getNodeInfo {
 		}
 	}
 
-	$NI->{system}{nodedown} = $NI->{system}{snmpdown} = $exit ? 'false' : 'true';
+	$NI->{system}{snmpdown} = $exit ? 'false' : 'true';
 
 	info("Finished with exit=$exit nodedown=$NI->{system}{nodedown}");
 	return $exit;
@@ -1453,9 +1453,9 @@ sub getIntfInfo {
 
 	# the default-default is no value whatsoever, for letting the snmp module do its thing
 	my $max_repetitions = $NI->{system}{max_repetitions} || 0;
+	my $interface_max_number = $C->{interface_max_number} ? $C->{interface_max_number} : 5000;
 
-
-	if ( defined $S->{mdl}{interface}{sys}{standard} ) {
+	if ( defined $S->{mdl}{interface}{sys}{standard} and $NI->{system}{ifNumber} <= $interface_max_number ) {
 		info("Starting");
 		info("Get Interface Info of node $NI->{system}{name}, model $NI->{system}{nodeModel}");
 
@@ -1869,6 +1869,9 @@ sub getIntfInfo {
 		}
 
 		info("Finished");
+	}
+	elsif ( $NI->{system}{ifNumber} > $interface_max_number ) {
+		info("Skipping, interface count $NI->{system}{ifNumber} exceeds configured maximum $interface_max_number");
 	}
 	else {
 		info("Skipping, interfaces not defined in Model");
@@ -2461,7 +2464,12 @@ sub updateNodeInfo {
 			getIntfInfo(sys=>$S); # get new interface table
 		}
 
-			# Read the uptime from the node info file from the last time it was polled
+		my $interface_max_number = $C->{interface_max_number} ? $C->{interface_max_number} : 5000;
+		if ($ifNumber > $interface_max_number ) {
+			info("INFO ($NI->{system}{name}) has $ifNumber interfaces, no interface data will be collected, to collect interface data increase the configured interface_max_number $interface_max_number, we recommend to test thoroughly");
+		}
+
+		# Read the uptime from the node info file from the last time it was polled
 		$NI->{system}{sysUpTimeSec} = int($NI->{system}{sysUpTime}/100); # seconds
 		$NI->{system}{sysUpTime} = convUpTime($NI->{system}{sysUpTimeSec});
 
@@ -2537,7 +2545,7 @@ sub updateNodeInfo {
 		$RI->{snmpresult} = 0;
 	}
 
-	$NI->{system}{nodedown} = $NI->{system}{snmpdown} = $exit ? 'false' : 'true';
+	$NI->{system}{snmpdown} = $exit ? 'false' : 'true';
 
 	### 2012-12-03 keiths, adding some model testing and debugging options.
 	if ( $model ) {
@@ -4344,6 +4352,7 @@ sub runAlerts {
 						my $level=$CA->{$sect}{$alrt}{level};
 
 						# check the thresholds
+						# fixed thresholds to fire at level not one off, and threshold falling was just wrong.
 						if ( $CA->{$sect}{$alrt}{type} =~ /^threshold/ )
 						{
 								if ( $CA->{$sect}{$alrt}{type} eq "threshold-rising" ) {
@@ -4354,7 +4363,7 @@ sub runAlerts {
 										else {
 												my @levels = qw(Warning Minor Major Critical Fatal);
 												foreach my $lvl (@levels) {
-														if ( $test_value <= $CA->{$sect}{$alrt}{threshold}{$lvl} ) {
+														if ( $test_value >= $CA->{$sect}{$alrt}{threshold}{$lvl} ) {
 																$test_result = 1;
 																$level = $lvl;
 																last;
@@ -4368,9 +4377,9 @@ sub runAlerts {
 												$level = "Normal";
 										}
 										else {
-												my @levels = qw(Warning Minor Major Critical Fatal);
+												my @levels = qw(Fatal Critical Major Minor Warning);
 												foreach my $lvl (@levels) {
-														if ( $test_value >= $CA->{$sect}{$alrt}{threshold}{$lvl} ) {
+														if ( $test_value <= $CA->{$sect}{$alrt}{threshold}{$lvl} ) {
 																$test_result = 1;
 																$level = $lvl;
 																last;
@@ -5463,12 +5472,21 @@ sub runEscalate {
 	}
 
 	#===========================================
+	my $stateless_event_dampening =  $C->{stateless_event_dampening} || 900;
 
 	# now handle escalations
 LABEL_ESC:
 	foreach $event_hash ( keys %{$ET} )  
 	{
 		dbg("process event with event_hash=$event_hash");
+		
+		# checking if event is stateless and dampen time has passed.
+		if ( getbool($ET->{$event_hash}{stateless}) and time() > $ET->{$event_hash}{startdate} + $stateless_event_dampening ) {
+			# yep, reset the event completely.
+			dbg("stateless event $ET->{$event_hash}{event} has exceeded dampening time of $stateless_event_dampening seconds.");
+			delete $ET->{$event_hash};
+		}
+				
 		# set event control to policy or default of enabled.
 		my $thisevent_control = $events_config->{$ET->{$event_hash}->{event}} || { Log => "true", Notify => "true", Status => "true"};
 
@@ -7105,7 +7123,8 @@ sub doThreshold {
 						if ($ts eq 'rrd') { 									# thresholds only in RRD subsection
 							foreach my $type (keys %{$M->{$s}{$ts}}) { 			# name/type of subsection
 								my $control = $M->{$s}{$ts}{$type}{control}; 	# check if skipped by control
-								if ($control ne "") {
+								### control was skipping indexed controls, which are already handled by graphtype
+								if ($control ne "" and getbool($M->{$s}{$ts}{$type}{indexed}) ) {
 									dbg("control found:$control for s=$s ts=$ts type=$type",1);
 									if ($S->parseString(string=>"($control) ? 1:0", sect => $ts, index => ) ne "1") {
 										dbg("threshold of type $type skipped by control=$control");
@@ -7128,6 +7147,7 @@ sub doThreshold {
 													dbg("skipping disabled threshold type $type for index $index");
 													next;
 											}
+											#
 											runThrHld(sys=>$S,table=>$sts,type=>$type,thrname=>$thrname,index=>$index);
 										}
 									} else {

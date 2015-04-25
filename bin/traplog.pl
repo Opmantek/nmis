@@ -59,7 +59,14 @@ my $filename = $ARGV[0] || "$FindBin::Bin/../logs/trap.log";
 my @buffer;
 my $hostname = <STDIN>;
 my $ipaddress = <STDIN>;
+
 chomp ($hostname, $ipaddress);
+
+# Traps received without DNS PTR are coming as hostname <UNKNOWN>
+#2015-04-11T09:32:13	<UNKNOWN>	UDP: [192.168.1.249]:57047->[192.168.1.7]	SNMPv2-MIB::sysUpTime.0=38:13:55:01.68	SNMPv2-MIB::snmpTrapOID.0=CISCO-CONFIG-MAN-MIB::ciscoConfigManEvent	.......
+if ( $hostname eq "<UNKNOWN>" and $ipaddress =~ /\[(\d+\.\d+\.\d+\.\d+)\]/ ) {
+	$hostname = $1;
+}
 
 # the remainder is all variables 
 while (<STDIN>) {
