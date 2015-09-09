@@ -1,7 +1,7 @@
 # a small update plugin for discovering interfaces on alcatel asam devices
 # which requires custom snmp accesses
 package AlcatelInterface;
-our $VERSION = "1.0.0";
+our $VERSION = "1.0.1";
 
 use strict;
 
@@ -23,9 +23,14 @@ sub update_plugin
 												or !getbool($NI->{system}->{collect}));
 
 	my $LNT = loadLocalNodeTable(); # fixme required? are rack_count and shelf_count kept in the node's ndinfo section?
-	my $NCT = loadNodeConfTable();
 	my $NC = $S->ndcfg;
 	my $V = $S->view;
+
+	# load any nodeconf overrides for this node
+	my ($errmsg, $override) = get_nodeconf(node => $node)
+			if (has_nodeconf(node => $node));
+	logMsg("ERROR $errmsg") if $errmsg;
+	$override ||= {};
 
 	# Get the SNMP Session going.
 	# fixme: the local myXX functions should be replaced by $S->open, and $S->{snmp}->xx
@@ -53,11 +58,16 @@ sub update_plugin
 	#asamSoftwareVersion1 OSWP/66.98.63.71/OSWPAA41.363/OSWPAA41.363
 	#asamSoftwareVersion2 OSWP/66.98.63.71/OSWPAA41.353/OSWPAA41.353
 	
-	### 2013-08-09 keiths, Coverting for new version strings.
-	#my $asamVersion41 = qr/OSWPAA41.353|OSWPAA37.432|OSWPAA41.363/;
-	#my $asamVersion42 = qr/OSWPAA42.413|L6GPAA42.413/;			
-	my $asamVersion41 = qr/OSWPAA41|L6GPAA41|OSWPAA37|L6GPAA37/;
-	my $asamVersion42 = qr/OSWPAA42|L6GPAA42/;
+	### 2015-06-12 New Version strings.
+	#asamSoftwareVersion1 OSWP/66.98.63.71/OSWPAA42.676/OSWPAA42.676
+	#asamSoftwareVersion2 10.58.10.137/OSWP/OSWPAA46.588
+
+	### 2015-06-17 New Version strings.
+	#asamSoftwareVersion1 OSWP/OSWPAA43.322/OSWPRA43.322
+	#asamSoftwareVersion2 OSWPRA41.353
+
+	my $asamVersion41 = qr/OSWPAA41|L6GPAA41|OSWPAA37|L6GPAA37|OSWPRA41/;
+	my $asamVersion42 = qr/OSWPAA42|L6GPAA42|OSWPAA46|OSWPRA43/;
 	
 	my $rack_count = 1;
 	my $shelf_count = 1;
@@ -109,8 +119,6 @@ sub update_plugin
 		my $ifDescr = getIfDescr(prefix => "ATM", version => $version, ifIndex => $index);
 		my $Description = getDescription(version => $version, ifIndex => $index);
 				
-		#$NCT->{$node}{$ifDescr}{ifDescr} = $ifDescr;
-
 		my $offset = 12288;
 		if ( $version eq "4.2" )  {
 			$offset = 6291456;
@@ -156,40 +164,41 @@ sub update_plugin
 				dbg("Interface Description changed to $S->{info}{interface}{$index}{ifDescr}");
 			}
 		}
+
+		my $thisintfover = $override->{$ifDescr} || {};
+
 		### add in anything we find from nodeConf - allows manual updating of interface variables
 		### warning - will overwrite what we got from the device - be warned !!!
-		if ($NCT->{$node}{$ifDescr}{Description} ne '') {
+		if ($thisintfover->{Description} ne '') {
 			$S->{info}{interface}{$index}{nc_Description} = $S->{info}{interface}{$index}{Description}; # save
-			$S->{info}{interface}{$index}{Description} = $V->{interface}{"${index}_Description_value"} = $NCT->{$node}{$ifDescr}{Description};
+			$S->{info}{interface}{$index}{Description} = $V->{interface}{"${index}_Description_value"} = $thisintfover->{Description};
 			dbg("Manual update of Description by nodeConf");
 		}
 		else {
 			$V->{interface}{"${index}_Description_value"} = $S->{info}{interface}{$index}{Description};
 		}
 		
-		if ($NCT->{$node}{$ifDescr}{ifSpeed} ne '') {
+		if ($thisintfover->{ifSpeed} ne '') {
 			$S->{info}{interface}{$index}{nc_ifSpeed} = $S->{info}{interface}{$index}{ifSpeed}; # save
-			$S->{info}{interface}{$index}{ifSpeed} = $V->{interface}{"${index}_ifSpeed_value"} = $NCT->{$node}{$ifDescr}{ifSpeed};
+			$S->{info}{interface}{$index}{ifSpeed} = $V->{interface}{"${index}_ifSpeed_value"} = $thisintfover->{ifSpeed};
 			### 2012-10-09 keiths, fixing ifSpeed to be shortened when using nodeConf
 			$V->{interface}{"${index}_ifSpeed_value"} = convertIfSpeed($S->{info}{interface}{$index}{ifSpeed});
 			info("Manual update of ifSpeed by nodeConf");
 		}
 		
-		if ($NCT->{$node}{$ifDescr}{ifSpeedIn} ne '') {
-			$S->{info}{interface}{$index}{nc_ifSpeedIn} = $S->{info}{interface}{$index}{ifSpeed}; # save
-			$S->{info}{interface}{$index}{ifSpeedIn} = $NCT->{$node}{$ifDescr}{ifSpeedIn};
-			
-			$S->{info}{interface}{$index}{nc_ifSpeed} = $S->{info}{interface}{$index}{nc_ifSpeedIn};
-			$S->{info}{interface}{$index}{ifSpeed} = $S->{info}{interface}{$index}{ifSpeedIn};
+		if ($thisintfover->{ifSpeedIn} ne '') {
+			$S->{info}{interface}{$index}{nc_ifSpeedIn} = $S->{info}{interface}{$index}{ifSpeedIn}; # save
+			$S->{info}{interface}{$index}{ifSpeedIn} = $thisintfover->{ifSpeedIn};
 			
 			### 2012-10-09 keiths, fixing ifSpeed to be shortened when using nodeConf
 			$V->{interface}{"${index}_ifSpeedIn_value"} = convertIfSpeed($S->{info}{interface}{$index}{ifSpeedIn});
 			info("Manual update of ifSpeedIn by nodeConf");
 		}
 		
-		if ($NCT->{$node}{$ifDescr}{ifSpeedOut} ne '') {
-			$S->{info}{interface}{$index}{nc_ifSpeedOut} = $S->{info}{interface}{$index}{ifSpeed}; # save
-			$S->{info}{interface}{$index}{ifSpeedOut} = $NCT->{$node}{$ifDescr}{ifSpeedOut};
+		if ($thisintfover->{ifSpeedOut} ne '') {
+			$S->{info}{interface}{$index}{nc_ifSpeedOut} = $S->{info}{interface}{$index}{ifSpeedOut}; # save
+			$S->{info}{interface}{$index}{ifSpeedOut} = $thisintfover->{ifSpeedOut};
+
 			### 2012-10-09 keiths, fixing ifSpeed to be shortened when using nodeConf
 			$V->{interface}{"${index}_ifSpeedOut_value"} = convertIfSpeed($S->{info}{interface}{$index}{ifSpeedOut});
 			info("Manual update of ifSpeedOut by nodeConf");
@@ -201,23 +210,23 @@ sub update_plugin
 		
 		### 2012-11-20 keiths, updates to index node conf table by ifDescr instead of ifIndex.
 		# modify by node Config ?
-		if ($NCT->{$node}{$ifDescr}{collect} ne '' and $NCT->{$node}{$ifDescr}{ifDescr} eq $S->{info}{interface}{$index}{ifDescr}) {
+		if ($thisintfover->{collect} ne '' and $thisintfover->{ifDescr} eq $S->{info}{interface}{$index}{ifDescr}) {
 			$S->{info}{interface}{$index}{nc_collect} = $S->{info}{interface}{$index}{collect};
-			$S->{info}{interface}{$index}{collect} = $NCT->{$node}{$ifDescr}{collect};
+			$S->{info}{interface}{$index}{collect} = $thisintfover->{collect};
 			dbg("Manual update of Collect by nodeConf");
 			if ($S->{info}{interface}{$index}{collect} eq 'false') {
 				$S->{info}{interface}{$index}{nocollect} = "Manual update by nodeConf";
 			}
 		}
-		if ($NCT->{$node}{$ifDescr}{event} ne '' and $NCT->{$node}{$ifDescr}{ifDescr} eq $S->{info}{interface}{$index}{ifDescr}) {
+		if ($thisintfover->{event} ne '' and $thisintfover->{ifDescr} eq $S->{info}{interface}{$index}{ifDescr}) {
 			$S->{info}{interface}{$index}{nc_event} = $S->{info}{interface}{$index}{event};
-			$S->{info}{interface}{$index}{event} = $NCT->{$node}{$ifDescr}{event};
+			$S->{info}{interface}{$index}{event} = $thisintfover->{event};
 			$S->{info}{interface}{$index}{noevent} = "Manual update by nodeConf" if $S->{info}{interface}{$index}{event} eq 'false'; # reason
 			dbg("Manual update of Event by nodeConf");
 		}
-		if ($NCT->{$node}{$ifDescr}{threshold} ne '' and $NCT->{$node}{$ifDescr}{ifDescr} eq $S->{info}{interface}{$index}{ifDescr}) {
+		if ($thisintfover->{threshold} ne '' and $thisintfover->{ifDescr} eq $S->{info}{interface}{$index}{ifDescr}) {
 			$S->{info}{interface}{$index}{nc_threshold} = $S->{info}{interface}{$index}{threshold};
-			$S->{info}{interface}{$index}{threshold} = $NCT->{$node}{$ifDescr}{threshold};
+			$S->{info}{interface}{$index}{threshold} = $thisintfover->{threshold};
 			$S->{info}{interface}{$index}{nothreshold} = "Manual update by nodeConf" if $S->{info}{interface}{$index}{threshold} eq 'false'; # reason
 			dbg("Manual update of Threshold by nodeConf");
 		}

@@ -80,7 +80,9 @@ sub new {
 }
 
 # initialise the system object for a given node
-# args: node (required, or name), snmp (defaults to 1)
+# node config is loaded only if snmp is true
+# args: node (required, or name), snmp (defaults to 1), update (defaults to 0)
+# update means ignore model loading errors
 sub init {
 	my $self = shift;
 	my %args = @_;
@@ -141,7 +143,7 @@ sub init {
 		logMsg("ERROR cannot load var/nmis-system.$ext");
 	}
 
-	# load node configuration
+	# load node configuration - attention: only done if snmp is true!
 	if ($exit and $snmp and $self->{name} ne "") {
 		if ($self->{cfg}{node} = getNodeCfg($self->{name})) {
 			dbg("cfg of node=$self->{name} loaded");
@@ -309,6 +311,8 @@ sub ifDescrInfo {
 # copy config and model info into node info table
 # args: type, if type==all then nodeModel and nodeType are only updated from mdl if missing
 # if type==overwrite then nodeModel and nodeType are updated unconditionally
+#
+# attention: if sys wasn't initialized with snmp true, then cfg will be blank!
 # if no type arg, then nodemodel and type aren't touched
 sub copyModelCfgInfo 
 {
@@ -468,8 +472,9 @@ sub getData {
 
 	my $result;
 	$self->{info}{graphtype} = {} if not exists $self->{info}{graphtype};
-	$result = $self->getValues(class=>$self->{mdl}{$class}{rrd},section=>$section,index=>$index,port=>$port,table=>$self->{info}{graphtype});
 
+	$result = $self->getValues(class=>$self->{mdl}{$class}{rrd},section=>$section,index=>$index,port=>$port,table=>$self->{info}{graphtype});
+	
 	### 2012-12-03 keiths, adding some model testing and debugging options.
 	if ( $dmodel and $result->{error} eq "") {
 		print "MODEL getData $self->{name} class=$class:\n";
@@ -551,8 +556,8 @@ sub getValues {
 
 	# create lists
 	foreach my $sect (keys %{$class}) {
-		dbg("section=$section sect=$sect");
 		next if $section ne ''  and $section ne $sect;
+		dbg("section=$section sect=$sect");
 		if ($index ne '' and $class->{$sect}{indexed} eq '') {
 			dbg("collect of type $sect skipped by NON indexed section, check this Model");
 			# we don't mark this as intentional skip, so the no oid error shows up
@@ -734,10 +739,14 @@ sub getValues {
 			$result->{skipped} = 1;
 			$result->{error} = "skipped because of control expression";
 	}
+	# FYI, this prevents that annoying debug "no oid loaded for section", when we do sys and no rrd intentionally.
+	elsif ( not defined $class->{$section} ) {
+		dbg("no rrd collection defined for section=$section");		
+	}
 	else {
 		my @sect = keys %{$class};
-		dbg("no oid loaded for section=@sect");
-		$result->{error} = "no oid loaded for section=@sect";
+		dbg("no oid loaded for section=$section all=@sect");
+		$result->{error} = "no oid loaded for section=$section all=@sect";
 	}
 	return $result;
 }

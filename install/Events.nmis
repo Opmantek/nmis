@@ -170,8 +170,19 @@
     'Log' => 'true',
     'Stateful' => 'true',
     'CancelingEvent' => 'Service Up',
-    'Description' => 'A service NMIS is managing has failed to respond.',
+    'Description' => 'A service NMIS is managing has failed completely.',
+		 },
+
+  'Service Degraded' => {
+    'Event' => 'Service Degraded',
+    'Notify' => 'true',
+    'Status' => 'true',
+    'Log' => 'true',
+    'Stateful' => 'true',
+    'CancelingEvent' => 'Service Up',
+    'Description' => 'A service that NMIS is managing is up but not fully working.',
   },
+		 
   'Proactive Response Time' => {
     'Event' => 'Proactive Response Time',
     'Notify' => 'true',
@@ -188,7 +199,7 @@
     'Log' => 'true',
     'Stateful' => 'true',
     'CancelingEvent' => 'Proactive Reachability Closed',
-    'Description' => 'The response time threshold of the node has been exceeded',
+    'Description' => 'The overall reachability of the node has has fallen below the threshold.',
   },
   'Proactive CPU' => {
     'Event' => 'Proactive CPU',

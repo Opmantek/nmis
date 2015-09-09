@@ -29,12 +29,13 @@
 #  
 # *****************************************************************************
 package func;
-our $VERSION = "1.2.5";
+our $VERSION = "1.4.0";
 
 use strict;
 use Fcntl qw(:DEFAULT :flock :mode);
 use File::Path;
 use File::stat;
+use File::Spec;
 use Time::ParseDate; # fixme: actually NOT used by func
 use Time::Local;		 # fixme: actuall NOT used by func
 use POSIX qw();			 # we want just strftime
@@ -83,6 +84,7 @@ use Exporter;
 		eventLevelSet
 		checkHostName
 		getBits
+		getDiskBytes
 
 		colorPercentLo
 		colorPercentHi
@@ -97,7 +99,9 @@ use Exporter;
 		loadTable
 		writeTable
 		setFileProt
+    setFileProtDiag
 		setFileProtDirectory
+    setFileProtParents
 		existFile
 		mtimeFile
 		getFileName
@@ -126,6 +130,11 @@ use Exporter;
 
 		checkPerlLib
     beautify_physaddress
+    
+		existsPollLock
+		createPollLock
+		releasePollLock
+
 	);
 
 
@@ -579,6 +588,16 @@ sub getBits {
 	else { /(\d+\.\d\d)/; return"$1 b${ps}"; }
 }
 
+sub getDiskBytes {
+	$_ = shift;
+	my $ps = shift; # 'ps'
+	if ( $_ eq "NaN" ) { return "$_" ;}
+	elsif ( $_ > 1073741824 ) { $_ /= 1073741824; /(\d+\.\d\d)/; return "$1 GB${ps}"; }
+	elsif ( $_ > 1048576 ) { $_ /= 1048576; /(\d+\.\d\d)/; return "$1 MB${ps}"; }
+	elsif ( $_ > 1024 ) { $_ /= 1024; /(\d+\.\d\d)/; return "$1 KB${ps}"; }
+	else { /(\d+\.\d\d)/; return"$1 b${ps}"; }
+}
+
 sub setDebug {
 	my $string = shift;
 	my $debug = 0;
@@ -699,124 +718,152 @@ sub alpha {
 	return lc($f) cmp lc($s);
 }
 
+# sets file ownership and permissions, with diagnostic return values
+# note: DO NOT USE setFileProt() from logMsg - use this one!
 #
+# args: file (required), username, permission
+# if run as root, then ownership is changed to username and primary group
+# if NOT root, then just the file group ownership is changed, to config nmis_group (if possible).
+#
+# returns undef if successful, error message otherwise
+sub setFileProtDiag
+{
+	my (%args) = @_;
+	my $C = loadConfTable();
+	
+	my $filename = $args{file};
+	my $username = $args{username} || $C->{'os_username'} || "nmis";
+	my $permission = $args{permission};
+
+	return "file=$filename does not exist"
+			if ( not -r $filename and ! -d $filename );
+	
+	my $currentstatus = stat($filename);
+
+	if (!$permission)
+	{
+		# dirs
+		if (S_ISDIR($currentstatus->mode))
+		{
+			$permission = $C->{'os_execperm'} || "0770";
+		}
+		# files
+		elsif ($filename =~ /$C->{'nmis_executable'}/ 
+					 && $C->{'os_execperm'} )
+		{
+			$permission = $C->{'os_execperm'};
+		}
+		elsif ($C->{'os_fileperm'})
+		{
+			$permission = $C->{'os_fileperm'};
+		}
+		else
+		{
+			$permission = "0660";
+		}
+	}
+
+	my ($login,$pass,$uid,$gid) = getpwnam($username);
+	return "cannot change file owner to unknown user \"$username\"!"
+			if (!$login);
+	my $onlygroup = getgrnam($C->{'nmis_group'}); # for the non-root case
+
+	# we can change file ownership iff running as root
+	my $myuid = $<;
+	if ( $myuid == 0) 
+	{
+		# ownership ok or in need of changing?
+		if ($currentstatus->uid != $uid or $currentstatus->gid != $gid)
+		{
+			dbg("setting owner of $filename to $username",3);
+
+			return("Could not change ownership of $filename to $username, $!")
+					if (!chown($uid,$gid,$filename));
+		}
+	}
+	elsif ($currentstatus->uid == $myuid )
+	{
+		# only root can change files that are owned by others, 
+		# but you don't need to be root to set the group and perms IF you're the owner 
+		# and if the target group is one you're a member of
+		# in this case username is IGNORED and we aim for config nmis_group
+	
+		if (defined($onlygroup) && $currentstatus->gid != $onlygroup)
+		{
+			dbg("setting group owner of $filename to $C->{nmis_group}",3);
+			return ("could not set the group of $filename to $C->{'nmis_group'}: $!")
+					if (!chown($myuid, $gid, $filename));
+		}
+	}
+	else
+	{
+		# we complain about this situation only if a change would be required
+		return "Cannot change ownership/permissions of $filename: neither root nor file owner!"
+				if (!defined($onlygroup) or $currentstatus->gid != $onlygroup);
+	}
+
+	# perms need changing?
+	if (($currentstatus->mode & 07777) != oct($permission))
+	{
+		dbg("setting permissions of $filename to $permission",3);
+		return "could not change $filename permissions to $permission, $!"
+				if (!chmod(oct($permission), $filename));
+	}
+
+	return undef;
+}
+
+	
+
+# this is the backwards-compatible version of setfileprotdiag,
+# which doesn't return anything AND uses logmsg.
+
 # set file owner and permission, default nmis and 0775.
 # change the default by conf/nmis.conf parameters "username" and "fileperm".
-#
 sub setFileProt {
 	my $filename = shift;
 	my $username = shift;
 	my $permission = shift;
-	my $login;
-	my $pass;
-	my $uid;
-	my $gid;
+
+	my $errmsg = setFileProtDiag(file => $filename, username => $username,
+															 permission => $permission);
+	if ($errmsg)
+	{
+		logMsg("ERROR, $errmsg");
+	}
+	return;
+}
+
+# fix up the file permissions for given directory,
+# and all its parents up to (but excluding) the given top (or nmis_base)
+# args: directory in question, topdir
+# returns nothing
+sub setFileProtParents
+{
+	my ($thisdir, $topdir) = @_;
 	my $C = loadConfTable();
 
-	if ( not -r $filename and ! -d $filename ) {	# adapted for directory: Till Dierkesmann
-		logMsg("ERROR, file=$filename does not exist");
-		return ;
+	$topdir ||= $C->{'<nmis_base>'};
+	$topdir = File::Spec->canonpath($topdir);
+	$thisdir = File::Spec->canonpath($thisdir);
+	
+	my $relative = File::Spec->abs2rel($thisdir, $topdir);
+	my $curdir = $topdir;
+
+	# don't make a mess if thisdir is outside of the topdir!
+	if ($thisdir !~ /$topdir/ or $relative =~ m!/\.\./!)
+	{
+		logMsg("ERROR: setFileProtParents called with bad args! thisdir=$thisdir top=$topdir relative=$relative");
+		return;
 	}
 
-	my $currentstatus = stat($filename);
-	
-	# set the permissions. Skip if not running as root
-	if ( $< == 0) { # root
-		if ($username eq '') {
-			if ( $C->{'os_username'} ne "" ) {
-				$username = $C->{'os_username'} ;
-			} 
-			else {
-				$username = "nmis"; # default
-			}
-		}
-		if ($permission eq '') {
-			if ( -d $filename and $C->{'os_execperm'} ne "" ) {
-				$permission = $C->{'os_execperm'} ;
-			}
-			elsif ( -f $filename and $filename =~ /$C->{'nmis_executable'}/ and $C->{'os_execperm'} ne "" ) {
-				$permission = $C->{'os_execperm'} ;
-			}
-			elsif ( -f $filename and $C->{'os_fileperm'} ne "" ) {
-				$permission = $C->{'os_fileperm'} ;
-			}
-			elsif ( -d $filename ) {	# Directory permission added by Till Dierkesmann
-				$permission = "0770"; # Default for dirs
-			}
-			else {
-				$permission = "0660"; # default
-			}
-		}
-		
-		if (!(($login,$pass,$uid,$gid) = getpwnam($username))) {
-			logMsg("ERROR, unknown username $username");
-		} else {
-			# ownership ok or in need of changing?
-			if ($currentstatus->uid != $uid or $currentstatus->gid != $gid)
-			{
-				dbg("setting owner of $filename to $username",3);
-				if (!chown($uid,$gid,$filename)) {
-					logMsg("ERROR, could not change ownership $filename to $username, $!");
-				}
-			}
-			# perms need changing?
-			if (($currentstatus->mode & 07777) != oct($permission))
-			{
-				dbg("setting permissions of $filename to $permission",3);
-				if (!chmod(oct($permission), $filename)) 
-				{
-					logMsg("ERROR, could not change $filename permissions to $permission, $!");
-				}
-			}
-		}
+	for my $component (File::Spec->splitdir($relative))
+	{
+		next if !$component;
+		$curdir.="/$component";
+		setFileProt($curdir);
 	}
-	else {
-		# Get the current UID and GID of the file.
-		my $myuid = $<;
-				
-		# only root can change files that are owned by others, 
-		# you don't need to be root to set the group and perms IF you're the owner 
-		# and if the target group is one you're a member of
-		if ( $currentstatus->uid == $myuid ) {
-			my $gid = getgrnam($C->{'nmis_group'});
-	
-			if ($currentstatus->gid != $gid)
-			{
-				dbg("setting group owner of $filename to $C->{nmis_group}",3);
-				my $cnt = chown($myuid, $gid, $filename);
-				if (not $cnt) {
-					logMsg("ERROR, could not set the group of $filename to $C->{'nmis_group'}: $!");
-				}
-			}
-			
-			if ( -d $filename and $C->{'os_execperm'} ne "" ) {
-				$permission = $C->{'os_execperm'} ;
-			}
-			elsif ( -f $filename and $filename =~ /$C->{'nmis_executable'}/ and $C->{'os_execperm'} ne "" ) {
-				$permission = $C->{'os_execperm'} ;
-			}
-			elsif ( -f $filename and $C->{'os_fileperm'} ne "" ) {
-				$permission = $C->{'os_fileperm'} ;
-			}
-			elsif ( -d $filename ) {	# Directory permission added by Till Dierkesmann
-				$permission = "0770"; # Default for dirs
-			}
-			else {
-				$permission = "0660"; # default
-			}
-			
-			if (($currentstatus->mode & 07777) != oct($permission))
-			{
-				dbg("setting permissions of $filename to $permission",3);
-				if (!chmod(oct($permission), $filename)) {
-					logMsg("ERROR, could not change $filename permissions to $permission: $!");
-				}
-			}
-		}
-		else {
-			dbg("INFO: $filename can not change unless root or you own it.",4);
-		}
-	}
+	return;
 }
 
 ### 2012-01-16 keiths, C_cache gets overwritten when using loadConfTable for multiple configs.
@@ -950,40 +997,53 @@ sub writeTable {
 	return;
 }
 
+# figures out the appropriate extension for a file, based
+# on location, config and json arg
+#
+# args: file (relative) and dir, or file (full path), json (optional), only_extension (optional)
+# variant with file+dir is used not commonly
 # attention: this function name clashes with a function in rrdfunc.pm!
-sub getFileName {
+#
+# returns absolute filename with extension
+sub getFileName 
+{
 	my %args = @_;
-	my $json = $args{json};
+	my $json = getbool($args{json});
 	my $file = $args{file};
 	my $dir = $args{dir};
 
-	my $check = $dir;
-	$check = $file if $file ne "";
-		
-	if ( ( getbool($C_cache->{use_json}) or $json ) and ( $check =~ /\/var/ or $check eq "var" ))  {
-		$file .= '.json' if $file !~ /\.json$/;
-		$file =~ s/\.nmis//g;
+	# are we in/under var?
+	my $fileundervar = ($dir and $dir =~ m!(^|/)var(/|$)!)
+			|| ($file and $file =~ m!(^|/)var(/|$)!);
+
+	my $conf_says_json = getbool($C_cache->{use_json});
+
+	# all files: use json if the arg says so
+	# var files: also use json if the config says so
+	# defaults: no json
+	if (($fileundervar and $conf_says_json) or $json )
+	{
+		return "json" if (getbool($args{only_extension}));
+		$file =~ s/\.nmis$//g;				# if somebody gave us a full but dud extension
+		$file .= '.json' if $file !~ /\.json/;
 	}
-	else {
+	else 
+	{
+		return "nmis" if (getbool($args{only_extension}));
+		$file =~ s/\.json$//g;
 		$file .= ".nmis" if $file !~ /\.nmis/;
 	}
+	$file = "$dir/$file" if ($dir);
 	return $file;
 }
 
-sub getExtension {
-	my %args = @_;
-	my $json = $args{json};
-	my $file = $args{file};
-	my $dir = $args{dir};
-	
-	my $check = $dir;
-	$check = $file if $file ne "";
-	
-	my $extension = "nmis";
-	if ( (getbool($C_cache->{use_json}) or $json ) and ( $check eq "var" or $check =~ /\/var/ ) ) {
-		$extension = "json";
-	}
-	return $extension;
+# variant of the getFileName function, just returning the extension
+# same arguments
+sub getExtension 
+{
+	my (%args) = @_;
+	return getFileName(dir => $args{dir}, file => $args{file}, 
+										 json => $args{json}, only_extension => 1);
 }
 
 ### write hash to file using Data::Dumper
@@ -1003,9 +1063,13 @@ sub writeHashtoFile {
 	my $json = getbool($args{json});
 	my $pretty = getbool($args{pretty});
 
-	### 2013-11-29 keiths, adding support for JSON.
-	my $useJson = ( (getbool($C_cache->{use_json}) or $json ) 
-									and $file =~ /\/var/ ) ? 1 : 0;
+	my $conf_says_json = getbool($C_cache->{use_json});
+
+	# all files: use json if the arg says so
+	# var files: also use json if the config says so
+	# defaults: no json
+	my $useJson = ( ($file =~ m!(^|/)var(/|$)! and $conf_says_json)
+									|| $json );
 	$file = getFileName(file => $file, json => $json);
 
 	dbg("write data to $file");
@@ -1064,19 +1128,22 @@ sub writeHashtoFile {
 
 
 ### read file with lock containing data generated by Data::Dumper, option = lock
-###
+# this reads both json and nmis files.
 sub readFiletoHash {
 	my %args = @_;
 	my $file = $args{file};
 	my $lock = getbool($args{lock}); # option
-	my $json = getbool($args{json});
+	my $json = getbool($args{json}); # also optional
 	my %hash;
 	my $handle;
 	my $line;
-			
-	### 2013-11-29 keiths, adding support for JSON.
-	my $useJson = ( ( getbool($C_cache->{use_json}) or $json ) and $file =~ /\/var/ ) ? 1 : 0;
+
+	# gefilename=getextension applies this heuristic:
+	# all files: use json if args say so
+	# files in and under var: also use json if config says so
+	# default: no json
 	$file = getFileName(file => $file, json => $json);
+	my $useJson = getExtension(file => $file, json => $json) eq "json";
 	
 	if ( -r $file ) {
 		my $filerw = $lock ? "+<$file" : "<$file";
@@ -1247,15 +1314,21 @@ sub htmlElementValues{};
 #}
 
 
-# message with (class::)method names and line number
-sub logMsg {
-	my $msg = shift;
+# this function logs to nmis_log in a safe, locked fashion
+# args: string, required; extended with (class::)method names and line number
+# optional: do_not_lock (default: false), to be used in signal handler ONLY!
+# returns: nothing
+sub logMsg 
+{
+	my ($msg, $do_not_lock) = @_;
+	$do_not_lock = getbool($do_not_lock); # ie. true only if explicitely set
+
 	my $C = $C_cache; # local scalar
 	my $handle;
 	
 	if ($C eq '') {
 		# no config loaded
-		die "FATAL logMsg, NO Config Loaded: $msg";
+		die "FATAL logMsg, NO Config Loaded: $msg\n";
 	}
 	### 2012-01-25 keiths, updated so using better cache
 	elsif ( not -f $nmis_log and not -d $nmis_logs ) {
@@ -1289,11 +1362,42 @@ sub logMsg {
 	$string .= "<br>$msg";
 	$string =~ s/\n/ /g;      #remove all embedded newlines
 
-	open($handle,">>$nmis_log") or warn returnTime." logMsg, Couldn't open log file $nmis_log. $!\n";
-	flock($handle, LOCK_EX)  or warn "logMsg, can't lock filename: $!";
-	print $handle returnDateStamp().",$string\n" or warn returnTime." logMsg, can't write file $nmis_log. $!\n";
-	close $handle or warn "logMsg, can't close filename: $!";
-	setFileProt($nmis_log);
+	# we MUST NOT use setfileprot because it may call logmsg...
+	# instead we use setfileprotdiag, and warn to stderr if need be
+	my $status_is_ok = 1;
+
+	if (!open($handle,">>$nmis_log"))
+	{
+		$status_is_ok = 0;
+		warn returnTime." logMsg, Couldn't open log file $nmis_log. $!\n";
+	}
+	else
+	{
+		if (!$do_not_lock)
+		{
+			if (!flock($handle, LOCK_EX))
+			{
+				$status_is_ok = 0;
+				warn "logMsg, can't lock filename: $!";
+			}
+		}
+		
+		if (!print $handle returnDateStamp().",$string\n")
+		{
+			$status_is_ok = 0;
+			warn returnTime." logMsg, can't write file $nmis_log. $!\n";
+		}
+		if (!close $handle)
+		{
+			$status_is_ok = 0;
+			warn "logMsg, can't close filename: $!";
+		}
+		if ($status_is_ok)
+		{
+			my $errmsg = setFileProtDiag(file => $nmis_log);
+			warn "logMsg, cannot set permissions: $errmsg\n" if ($errmsg);
+		}
+	}
 }
 
 my %loglevels = ( "EMERG"=>0,"ALERT"=>1,"CRITICAL"=>2,"ERROR"=>3,"WARNING"=>4,"NOTICE"=>5,"INFO"=>6,"DEBUG"=>7);
@@ -1493,11 +1597,11 @@ sub logDebug {
 	my $handle;
 	
 	if ( -f $file and not -w $file ) {
-		logMsg "ERROR, logDebug can not write file $file\n";
+		logMsg("ERROR, logDebug can not write file $file\n");
 		$fileOK = 0;
 	}
 	elsif ( -d $file ) {
-		logMsg "ERROR, logDebug $file is a directory\n";
+		logMsg("ERROR, logDebug $file is a directory\n");
 		$fileOK = 0;
 	}
 
@@ -1716,6 +1820,8 @@ sub getKernelName {
 	return $kernel;
 }
 
+# creates the dir in question, and all missing intermediate 
+# directories in the path.
 sub createDir {
 	my $dir = shift;
 	my $C = loadConfTable();
@@ -2126,13 +2232,17 @@ sub selftest
 	# check the main/involved directories AND /tmp and /var
 	my $minfreepercent = $config->{selftest_min_diskfree_percent} || 10;
 	my $minfreemegs = $config->{selftest_min_diskfree_mb} || 25;
-	for my $dir ("/tmp","/var",
-							 @{$config}{'<nmis_base>','<nmis_var>',
-													'<nmis_logs>','database_root'})
+	# do tmp and var last as we skip already seen ones
+	my %fs_ids;
+	for my $dir (@{$config}{'<nmis_base>','<nmis_var>',
+													'<nmis_logs>','database_root'}, "/tmp","/var","/xyz")
 	{
-		next if (!-d $dir);
-		my $testname = "Free space in $dir";
+		my $statresult = stat($dir);
+		# nonexistent dir or seen that filesystem? ignore
+		next if (!$statresult or $fs_ids{$statresult->dev}); 
+		$fs_ids{$statresult->dev} = 1;
 
+		my $testname = "Free space in $dir";
 		my @df = `df -mP $dir 2>/dev/null`;
 		if ($? >> 8)
 		{
@@ -2146,13 +2256,13 @@ sub selftest
 		$usedpercent =~ s/%$//;
 		if (100-$usedpercent < $minfreepercent)
 		{
-			push @details, [$testname, "Only ".(100-$usedpercent)."% available!"];
+			push @details, [$testname, "Only ".(100-$usedpercent)."% free in $dir!"];
 			$$dbdir_status = 0 if (ref($dbdir_status) eq "SCALAR" and $dir eq $config->{"database_root"});
 			$allok=0;
 		}
 		elsif ($remaining < $minfreemegs)
 		{
-			push @details, [$testname, "Only $remaining Megabytes available!"];
+			push @details, [$testname, "Only $remaining Megabytes free in $dir!"];
 			$$dbdir_status = 0 if (ref($dbdir_status) eq "SCALAR" and $dir eq $config->{"database_root"});
 			$allok=0;
 		}
@@ -2490,6 +2600,81 @@ sub beautify_physaddress
 	}
 
 	return $raw;									# fallback to return the input unchanged if beautication doesn't work out
+}
+
+sub getFilePollLock {
+	my %args = @_;
+	my $type = $args{type};
+	my $conf = $args{conf};
+	my $node = $args{node};
+	my $C = loadConfTable();
+
+	my $lockFile = $C->{'<nmis_var>'}."/".lc($node)."-$conf-$type.lock";
+
+	return($lockFile);
+}
+
+# returns true if poll lock exists, returns false otherwise
+sub existsPollLock {
+	my %args = @_;
+	my $type = $args{type};
+	my $conf = $args{conf};
+	my $node = $args{node};
+	my $PID = undef;
+	my $handle = undef;
+	
+	my $lockFile = getFilePollLock(type => $type, conf => $conf, node => $node);
+	
+	if ( -f $lockFile ) {
+		open($handle, "$lockFile") or warn "existsPollLock: ERROR cannot open $lockFile: $!\n";
+		unless (flock($handle, LOCK_EX|LOCK_NB)) {
+			# can not get a lock
+			#warn "can't immediately write-lock the file ($!), blocking ...";
+			return 1;
+		}
+		return 0;
+	}
+	else {
+		return 0;	
+	}
+
+}
+
+sub createPollLock {
+	my %args = @_;
+	my $type = $args{type};
+	my $conf = $args{conf};
+	my $node = $args{node};
+	my $handle = undef;
+
+	my $lockFile = getFilePollLock(type => $type, conf => $conf, node => $node);
+	
+	if ( not existsPollLock(%args) ) {	
+		my $PID = $$;
+		open($handle, ">$lockFile")  or warn "createPollLock: ERROR cannot open $lockFile: $!\n";
+		flock($handle, LOCK_EX) or warn "createPollLock: ERROR can't lock file $lockFile, $!\n";
+		print $handle "$PID\n";
+		return($handle);
+	}
+	return undef;
+}
+
+sub releasePollLock {
+	my %args = @_;
+	my $type = $args{type};
+	my $conf = $args{conf};
+	my $node = $args{node};
+	my $handle = $args{handle};
+
+	my $lockFile = getFilePollLock(type => $type, conf => $conf, node => $node);
+
+	if (defined $handle) {
+		flock($handle, LOCK_UN) or warn "releasePollLock: ERROR Cannot unlock $lockFile - $!\n";
+		close($handle) or warn "releasePollLock: ERROR can't close file $lockFile, $!\n";
+		unlink($lockFile) or warn "releasePollLock: ERROR can't delete file $lockFile, $!\n";
+		return 1;
+	}
+	return 0;
 }
 
 1;

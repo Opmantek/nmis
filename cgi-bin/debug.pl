@@ -357,9 +357,10 @@ print "<h1>Dynamic Tables</h1></br>";
 my $NT = loadNodeTable();
 print '<h2>Node Table [\$NT]</h2>';
 print dumper_html($NT);
-my $nt = loadNodeConfTable();
-print '<h2>NodeConf Table [\$NT]</h2>';
-print dumper_html($nt);
+my ($errmsg, $overrides) = get_nodeconf();
+print '<h2>NodeConf</h2>';
+print "<p>$errmsg</p>" if ($errmsg);
+print dumper_html($overrides);
 
 	my $GT = loadGroupTable();
 print '<h2>Group Table [\$GT]</h2>';
@@ -369,9 +370,9 @@ loadInterfaceInfo;
 print "<h2>InterfaceInfo Table ( all node interfaces)</h2>";
 print dumper_html(\%NMIS::interfaceInfo);
 
-my $ET = loadEventStateNoLock; # load by file or db
 print "<h2>Current Events</h2>";
-print dumper_html($ET);
+my %allevents = loadAllEvents;
+print dumper_html(\%allevents);
 
 my $OT = loadOutageTable();
 print "<h2>Outage Table</h2>";

@@ -36,6 +36,7 @@ use lib "$FindBin::Bin/../lib";
 # 
 use strict;
 use NMIS;
+use NMIS::UUID;
 use Sys;
 use func;
 use csv;
@@ -80,6 +81,7 @@ if ($Q->{server} ne "") { exit if requestServer(headeropts=>$headeropts); }
 
 my $formid = $Q->{table} ? "nmis$Q->{table}" : "nmisTable";
 
+# this cgi script defaults to widget mode ON
 my $widget = getbool($Q->{widget},"invert")? "false" : "true";
 my $wantwidget = $widget eq "true";
 
@@ -428,12 +430,17 @@ sub editTable {
 						} 
 						elsif ($ref->{$item}{display} =~ /textbox/) {
 							my $value = ($T->{$key}{$item} or $func eq 'doedit') ? $T->{$key}{$item} : $ref->{$item}{value}[0];
-							$line .= td(textarea(-name=> $item, -value=>$value, -style=>"width: 260px; height: 60px;", -size=>'35'));
+							$line .= td(textarea(-name=> $item, -value=>$value, 
+																	 -style=> 'width: 95%;',
+																	 -rows => 3,
+																	 -columns => ($wantwidget? 35 : 70)));
 						} 
 						elsif ($ref->{$item}{display} =~ /text/) {
 							my $value = ($T->{$key}{$item} or $func eq 'doedit') ? $T->{$key}{$item} : $ref->{$item}{value}[0];
 							#print STDERR "DEBUG editTable: text -- item=$item, value=$value\n";
-							$line .= td(textfield(-name=>$item, -value=>$value, -style=>"width: 260px;", -size=>'35'));
+							$line .= td(textfield(-name=>$item, -value=>$value, 
+																		-style=> 'width: 95%;',
+																		-size=>  ($wantwidget? 35 : 70)));
 						} 
 						elsif ($ref->{$item}{display} =~ /readonly/) {
 							my $value = ($T->{$key}{$item} or $func eq 'doedit') ? $T->{$key}{$item} : $ref->{$item}{value}[0];
@@ -445,13 +452,13 @@ sub editTable {
 							$line .= td(popup_menu(
 									-name=>"$item", 
 									-values=>$ref->{$item}{value},
-									-style=>'width:100%;',
+									-style=>'width: 95%;',
 									-default=>$T->{$key}{$item}));
 						} 
 						elsif ($ref->{$item}{display} =~ /scrol/) {
 							my @items = split(/,/,$T->{$key}{$item});
 							$line.= td(scrolling_list(-name=>"$item", -multiple=>'true',
-									-style=>'width:100%;',
+									-style=>'width: 95%;',
 									-size=>'6',
 									-values=>$ref->{$item}{value},
 									-default=>\@items));
@@ -522,7 +529,7 @@ sub doeditTable {
 	}
 
 	my $V;
-	# store new values in table
+	# store new values in table structure
 	for my $ref ( @{$CT}) {
 		for my $item (keys %{$ref}) {
 		    
@@ -530,6 +537,32 @@ sub doeditTable {
 			$V->{$item} = stripSpaces($Q->{$item});
 		}
 		
+	}
+
+	# some sanity checks BEFORE writing the data out
+	if ($table eq 'Nodes') 
+	{
+		# check host address
+		if ($T->{$key}{host} eq '') {
+			print header($headeropts);
+			print Tr(td({class=>'error'} ,"Field \'host\' must be filled in table $table"));
+			return 0;
+		}
+		
+		### test the DNS for DNS names, if no IP returned, error exit
+		if ( $T->{$key}{host} !~ /\d+\.\d+\.\d+\.\d+/ ) {
+			my $address = resolveDNStoAddr($T->{$key}{host});
+			if ( $address !~ /\d+\.\d+\.\d+\.\d+/ or !$address ) {
+				print header($headeropts);
+				print Tr(td({class=>'error'} ,"ERROR, cannot resolve IP address \'$T->{$key}{host}\'<br>".
+									"Please correct this item in table $table"));
+				return 0;
+			}
+		}
+
+		# ensure a uuid is present
+		$T->{$key}->{uuid} ||= getUUID($key);
+		$V->{uuid} ||= $T->{$key}->{uuid};
 	}
 
 	my $db = "db_".lc($table)."_sql";
@@ -551,23 +584,8 @@ sub doeditTable {
 	}
 
 	# do update node with new values
-	if ($table eq 'Nodes') {
-		# check host address
-		if ($T->{$key}{host} eq '') {
-			print header($headeropts);
-			print Tr(td({class=>'error'} ,"Field \'host\' must be filled in table $table"));
-			return 0;
-		}
-		### test the DNS for DNS names, if no IP returned, error exit
-		if ( $T->{$key}{host} !~ /\d+\.\d+\.\d+\.\d+/ ) {
-			my $address = resolveDNStoAddr($T->{$key}{host});
-			if ( $address !~ /\d+\.\d+\.\d+\.\d+/ or !$address ) {
-				print header($headeropts);
-				print Tr(td({class=>'error'} ,"ERROR, cannot resolve IP address \'$T->{$key}{host}\'<br>".
-									"Please correct this item in table $table"));
-				return 0;
-			}
-		}
+	if ($table eq 'Nodes') 
+	{
 		#print STDERR "DEBUG: doeditTable->cleanEvent key=$key\n";
 		cleanEvent($key,"tables.pl.editNodeTable");
 		if (getbool($Q->{update})) {

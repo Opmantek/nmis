@@ -1,6 +1,4 @@
 #
-## $Id: Modules.pm,v 1.6 2012/08/13 05:05:00 keiths Exp $
-#
 #  Copyright (C) Opmantek Limited (www.opmantek.com)
 #
 #  ALL CODE MODIFICATIONS MUST BE SENT TO CODE@OPMANTEK.COM
@@ -101,7 +99,8 @@ sub getModules {
 
 sub moduleInstalled {
 	my ($self,%arg) = @_;
-	my $installedModules = $self->installedModules();
+	my $installedModules = $self->installedModules(); # fixme should be an array NOT a commastring
+	# fixme this is imprecise and brittle
 	if ( $installedModules =~ /$arg{module}/ ) {
 		return 1;
 	}
@@ -158,6 +157,58 @@ sub installedModules {
 	}
 }
 
+sub installedModulesList {
+	my $self = shift;
+	my $installedModules;
+	my @installed;
+	
+	# from the cache
+	if ( defined $self->{installed} ) {
+		return $self->{installed};
+	}
+	else {
+		my $modules = $self->getModules();
+		
+		foreach my $mod (keys %{$modules} ) {
+			if ( $modules->{$mod}{base} eq "opmantek" ) { 
+				print STDERR "DEBUG: module_base=$self->{module_base} base=$modules->{$mod}{base}, $self->{module_base}$modules->{$mod}{file}\n" if $self->{debug};
+				if ( -f "$self->{module_base}$modules->{$mod}{file}" ) {
+					push(@installed,$modules->{$mod}{name});
+				}
+			}
+			elsif ( $modules->{$mod}{base} eq "omk" ) { 
+				if ( -f "$self->{omk_base}$modules->{$mod}{file}" ) {
+					push(@installed,$modules->{$mod}{name});
+				}
+			}
+			elsif ( $modules->{$mod}{base} eq "opmojo" ) { 
+				if ( -f "$self->{opmojo_base}$modules->{$mod}{file}" ) {
+					push(@installed,$modules->{$mod}{name});
+				}
+			}
+			elsif ( $modules->{$mod}{base} eq "open-audit" ) { 
+				if ( -f "$self->{oav2_base}$modules->{$mod}{file}" ) {
+					push(@installed,$modules->{$mod}{name});
+				}
+			}
+			elsif ( $modules->{$mod}{base} =~ /nmis/ ) {
+				print STDERR "DEBUG: nmis_base=$self->{nmis_base} base=$modules->{$mod}{base}, $self->{nmis_base}$modules->{$mod}{file}\n" if $self->{debug};
+				if ( -f "$self->{nmis_base}$modules->{$mod}{file}" ) {
+					push(@installed,$modules->{$mod}{name});
+				}
+			}
+		}
+		
+		$installedModules = join(",",@installed);
+		
+		# cache this for later use
+		$self->{installed} = $installedModules;
+		return @installed;	
+	}
+}
+
+
+# returns html for a menu, works only within the main nmis gui
 sub getModuleCode {
 	my $self = shift;
 
@@ -200,6 +251,33 @@ sub getModuleCode {
 		
 	return $modCode;
 }
+
+# returns an array ref of [module title, link, tagline] 
+# for every known module (installed or not)
+sub getModuleLinks
+{
+	my ($self) = @_;
+	my @links;
+	
+	my $modules = $self->getModules();
+	my @installed = $self->installedModulesList();
+	foreach my $mod 
+			(sort { $modules->{$a}{order} <=> $modules->{$b}{order} } (keys %{$modules}) ) 
+	{
+		my $thismod = $modules->{$mod};
+
+		# skip "More Modules" and other fudged up stuff...
+		next if ((!$thismod->{base} and !$thismod->{file})
+						 or $thismod->{name} eq "opService"); # on the way out
+
+		my $modInstalled = ( grep { /$mod/ } @installed) ? 1 : 0;		
+		my $link = $modInstalled ? $thismod->{link} : "https://opmantek.com/network-management-system-tools/";
+		
+		push @links, [$thismod->{name}, $link, $thismod->{tagline}];
+	}
+	return \@links;
+}
+
 
 1;
                                                                                                                                                                                                                                                         

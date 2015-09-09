@@ -179,6 +179,7 @@ sub menu_bar_site {
 		push @netstatus, qq|<a id='ntw_view' href="network.pl?conf=$Q->{conf}&amp;refresh=$widget_refresh&amp;act=network_summary_view">Network Metrics and Health</a>|;
 		push @netstatus, qq|<a id='ntw_health' href="network.pl?conf=$Q->{conf}&amp;refresh=$widget_refresh&amp;act=network_summary_health">Network Status and Health</a>|;
 		push @netstatus, qq|<a id='ntw_summary' href="network.pl?conf=$Q->{conf}&amp;refresh=$widget_refresh&amp;act=network_summary_large">Network Status and Health by Group</a>|;
+		push @netstatus, qq|<a id='ntw_services' href="services.pl?conf=$Q->{conf}">Monitored Services</a>|;
 		push @netstatus, qq|<a id='src_events' href="events.pl?conf=$Q->{conf}&amp;act=event_table_list">Current Events</a>|
 				if ($AU->CheckAccess("tls_event_db","check"));
 
@@ -303,6 +304,7 @@ sub menu_bar_site {
 				qq|<a id='find_interface' href="find.pl?conf=$Q->{conf}&amp;act=find_interface_menu">Interface</a>|
 		];
 		push @sdeskstuff, qq|Logs|, \@logstuff if (@logstuff);
+		push @sdeskstuff, qq|<a id='ntw_services' href="services.pl?conf=$Q->{conf}">Monitored Services</a>|;
 								
 		push @menu_site, qq|Service Desk|, \@sdeskstuff;
 
@@ -357,10 +359,19 @@ sub menu_bar_site {
 		#push @systemitems, qq|------| if (@tableMenu); # no separator if there's nothing to separate...
 
 		push @systemitems, qq|System Configuration|, \@tableMenu if (@tableMenu);
-		push @systemitems, qq|Configuration Check|,
-		[	qq|<a id='tls_event_flow' href="view-event.pl?conf=$Q->{conf}&amp;act=event_flow_view">Check Event Flow</a>|,
-			qq|<a id='tls_event_db' href="view-event.pl?conf=$Q->{conf}&amp;act=event_database_list">Check Event DB</a>| ]
-					if ($AU->CheckAccess("tls_event_flow","check"));
+
+		if ($AU->CheckAccess("tls_event_flow","check")
+				or $AU->CheckAccess("Table_Nodes_view","check"))
+		{
+			my @submenu;
+			
+			push @submenu, qq|<a id='cfg_setup' href="network.pl?conf=$Q->{conf}&amp;act=node_admin_summary">Node Admin Summary</a>| if ($AU->CheckAccess("Table_Nodes_view","check"));
+			
+			push @submenu, 	qq|<a id='tls_event_flow' href="view-event.pl?conf=$Q->{conf}&amp;act=event_flow_view">Check Event Flow</a>|,
+			qq|<a id='tls_event_db' href="view-event.pl?conf=$Q->{conf}&amp;act=event_database_list">Check Event DB</a>| if ($AU->CheckAccess("tls_event_flow","check"));
+
+			push @systemitems, qq|Configuration Check|, \@submenu;
+		}
 
 		my @hostdiags;
 		if ($AU->CheckAccess("tls_nmis_runtime", "check"))
@@ -369,7 +380,6 @@ sub menu_bar_site {
 			qq|<a id='nmis_poll' href="network.pl?conf=$Q->{conf}&amp;act=nmis_polling_summary">NMIS Polling Summary</a>|,
 			qq|<a id='nmis_run' href="network.pl?conf=$Q->{conf}&amp;refresh=$widget_refresh&amp;act=nmis_runtime_view">NMIS Runtime Graph</a>|;
 		};
-
 		push @hostdiags, qq|<a id='tls_host_info' href="tools.pl?conf=$Q->{conf}&amp;act=tool_system_hostinfo">NMIS Host Info</a>|;
 
 		for my $cmd (qw(date df ps iostat vmstat who))
@@ -379,12 +389,11 @@ sub menu_bar_site {
 		}		
 		push @systemitems, qq|Host Diagnostics|, \@hostdiags if (@hostdiags);
 
-		my @setupitems;
-
-		push 	@setupitems, qq|<a id='cfg_setup' href="setup.pl?conf=$Q->{conf}&amp;act=setup_menu">Basic Setup</a>|
+		push @setupitems, qq|<a id='cfg_setup' href="setup.pl?conf=$Q->{conf}&amp;act=setup_menu">Basic Setup</a>|
 				if ($AU->CheckAccess("table_config_view","check"));
 
-		push @setupitems, qq|           | if (@setupitems); # no separator if there's nothing to separate...
+		# no separator if there's nothing to separate...
+		push @setupitems, qq|           | if (@setupitems);
 
 		push @setupitems, qq|--- Advanced Setup ---| if (@setupitems); # no separator if there's nothing to separate...
 		
@@ -563,7 +572,7 @@ Copyright (C) <a href="http://www.opmantek.com">Opmantek Limited (www.opmantek.c
 This program comes with ABSOLUTELY NO WARRANTY;<br/>
 This is free software licensed under GNU GPL, and you are welcome to<br/>
 redistribute it under certain conditions; see <a href="http://www.opmantek.com">www.opmantek.com</a> or email<br/>
- <a href="mailto://contact\@opmantek.com">contact\@opmantek.com<br/>
+ <a href="mailto:contact\@opmantek.com">contact\@opmantek.com<br/>
 
 EO_TEXT
 
