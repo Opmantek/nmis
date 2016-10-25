@@ -115,21 +115,6 @@
           }
         }
       },
-      'hrsmpcpu' => {
-        'event' => 'Proactive CPU',
-        'item' => 'hrCpuLoad',
-        'select' => {
-          'default' => {
-            'value' => {
-              'critical' => '70',
-              'fatal' => '80',
-              'major' => '60',
-              'minor' => '50',
-              'warning' => '40'
-            }
-          }
-        }
-      },
       'cpuUtil' => {
         'item' => 'cpuUtil',
         'event' => 'Proactive CPU',
@@ -265,6 +250,76 @@
           }
         }
       },
+      'hrdisk' => {
+        'event' => 'Proactive Disk Usage',
+        'item' => 'hrDiskUsedPer',
+        'select' => {
+          '10' => {
+            'control' => '$hrDiskSize <= 209715200000 and $hrStorageType =~ /Fixed Disk/',
+            'value' => {
+              'fatal' => '97',
+              'critical' => '95',
+              'major' => '90',
+              'minor' => '80',
+              'warning' => '75',
+            },
+          },
+          '20' => {
+            'control' => '$hrDiskSize <= 1610612736000 and $hrDiskSize >= 209715200000 and $hrStorageType =~ /Fixed Disk/',
+            'value' => {
+              'fatal' => '99',
+              'critical' => '97',
+              'major' => '95',
+              'minor' => '93',
+              'warning' => '90',
+            },
+          },
+          '30' => {
+            'control' => '$hrDiskSize <= 3221225472000 and $hrDiskSize >= 1610612736000 and $hrStorageType =~ /Fixed Disk/',
+            'value' => {
+              'fatal' => '99',
+              'critical' => '98',
+              'major' => '96',
+              'minor' => '93',
+              'warning' => '90',
+            },
+          },
+          '40' => {
+            'control' => '$hrDiskSize >= 3221225472000 and $hrStorageType =~ /Fixed Disk/',
+            'value' => {
+              'fatal' => '99.5',
+              'critical' => '99',
+              'major' => '98',
+              'minor' => '96',
+              'warning' => '93',
+            },
+          },
+          'default' => {
+            'value' => {
+              'fatal' => '97',
+              'critical' => '95',
+              'major' => '90',
+              'minor' => '80',
+              'warning' => '75',
+            }
+          }
+        }
+      },
+      'hrsmpcpu' => {
+        'event' => 'Proactive CPU',
+        'item' => 'hrCpuLoad',
+        'select' => {
+          'default' => {
+            'value' => {
+              'critical' => '70',
+              'fatal' => '80',
+              'major' => '60',
+              'minor' => '50',
+              'warning' => '40'
+            }
+          }
+        }
+      },
       'hrsmpcpu' => {
         'item' => 'hrCpuLoad',
         'event' => 'Proactive CPU',
@@ -348,11 +403,11 @@
             'value' => {
               'critical' => '2000',
               'fatal' => '3000',
-              'minor' => '300',
-              'warning' => '100',
+              'minor' => '600',
+              'warning' => '400',
               'major' => '1000'
             },
-            'control' => '$nodeType =~ /example/'
+            'control' => '$location =~ qr/Cloud/'
           },
           '20' => {
             'value' => {
@@ -655,6 +710,51 @@
           }
         }
       },
+      'memPoolUtil' => {
+        'item' => 'memUtil',
+        'event' => 'Proactive Memory Utilisation',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '99',
+              'critical' => '95',
+              'major' => '90',
+              'minor' => '85',
+              'warning' => '80',
+            }
+          }
+        }
+      },
+      'bufferUtil' => {
+        'item' => 'bufferUtil',
+        'event' => 'Proactive Buffer Utilisation',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '100',
+              'critical' => '96',
+              'major' => '94',
+              'minor' => '92',
+              'warning' => '90',
+            }
+          }
+        }
+      },
+      'bufferMissPct' => {
+        'item' => 'bufferMissPct',
+        'event' => 'Proactive Buffer Misses',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '50',
+              'critical' => '40',
+              'major' => '30',
+              'minor' => '20',
+              'warning' => '10',
+            }
+          }
+        }
+      },
       'jnx_cpu' => {
         'event' => 'Proactive CPU',
         'item' => 'jnxOper5MinLoadAvg',
@@ -741,6 +841,86 @@
               'major' => '75',
               'minor' => '70',
               'warning' => '60'
+            }
+          }
+        }
+      },
+      'qos_pkt_drop' => {
+        'event' => 'Proactive QoS Packet Drops',
+        'item' => 'DropPkt',
+        'control_regex' => 'Critical|Voice|Video',
+        'control_regex_comment' => 'Use the control regex field to limit which CBQoS Classes will match.',
+        'control_regex_example' => 'class-default$|Voice$',
+        'select_comment' => 'the values below are number of packets',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '240',
+              'critical' => '80',
+              'major' => '40',
+              'minor' => '20',
+              'warning' => '10'
+            }
+          }
+        }
+      },
+      'qos_pkt_drop_no_buf' => {
+        'event' => 'Proactive QoS no buffer Packet Drops',
+        'item' => 'NoBufDropPkt',
+        'control_regex' => 'Critical|Voice|Video',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '240',
+              'critical' => '80',
+              'major' => '40',
+              'minor' => '20',
+              'warning' => '10'
+            }
+          }
+        }
+      },
+      'WindowsProcessor' => {
+        'item' => 'percentProcessor',
+        'event' => 'Proactive CPU',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '100',
+              'critical' => '95',
+              'major' => '90',
+              'minor' => '85',
+              'warning' => '80',
+            }
+          }
+        }
+      },
+      'WindowsPaging' => {
+        'item' => 'percentPageUsage',
+        'event' => 'Proactive Page File Usage',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '95',
+              'critical' => '80',
+              'major' => '70',
+              'minor' => '60',
+              'warning' => '50',
+            }
+          }
+        }
+      },
+      'DiskQueueLength' => {
+        'item' => 'AvgDiskQLen',
+        'event' => 'Proactive Disk Queue Length',
+        'select' => {
+          'default' => {
+            'value' => {
+              'fatal' => '5',
+              'critical' => '4',
+              'major' => '2',
+              'minor' => '1',
+              'warning' => '0.1',
             }
           }
         }

@@ -290,7 +290,7 @@
           },
           'ifDescr' => {
             'oid' => 'ifDescr',
-            'title' => 'Name'
+            'title' => 'Name (ifDescr)'
           },
 					'ifPhysAddress' => {
             'oid' => 'ifPhysAddress',
@@ -316,7 +316,7 @@
           },
           'ifType' => {
             'oid' => 'ifType',
-            'title' => 'Type'
+            'title' => 'Type (ifType)'
           },
           'ifLastChange' => {
             'oid' => 'ifLastChange',
@@ -329,7 +329,7 @@
         'snmp' => {
           'Description' => {
             'oid' => 'ifAlias',
-            'title' => 'Description'
+            'title' => 'Description (ifAlias)'
           }
         }
       }
@@ -537,8 +537,8 @@
         'DEF:status=$database:ifOperStatus:AVERAGE',
         'CDEF:inputBits=input,8,*',
         'CDEF:outputBits=output,8,*',
-        'CDEF:inputUtil=inputBits,$speed,/,100,*',
-        'CDEF:outputUtil=outputBits,$speed,/,100,*',
+        'CDEF:inputUtil=inputBits,$inSpeed,/,100,*',
+        'CDEF:outputUtil=outputBits,$outSpeed,/,100,*',
         'CDEF:totalUtil=outputUtil,inputUtil,+,2,/',
         'PRINT:status:AVERAGE:availability=%1.2lf',
         'PRINT:inputUtil:AVERAGE:inputUtil=%1.2lf',

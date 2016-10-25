@@ -54,6 +54,18 @@
       'asset' => {
         'common-model' => 'Cisco-asset'
       },
+      'cpu' => {
+        'common-model' => 'Cisco-cpu'
+      },
+      'memory' => {
+        'common-model' => 'Cisco-memory'
+      },
+      'mpls' => {
+        'common-model' => 'mpls'
+      },
+      'cbqos' => {
+        'common-model' => 'Cisco-cbqos'
+      },
       'neighbor' => {
         'common-model' => 'Cisco-neighbor'
       },
@@ -205,7 +217,34 @@
             'oid' => 'sysDescr',
             'snmpObjectName' => 'sysDescr',
             'title' => 'Software Version'
-          }
+          },
+          'mplsLdpLsrId' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.1.1',
+            'snmpObjectName' => 'mplsLdpLsrId',
+            'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
+            'title' => 'MPLS LSR'
+          },
+          'mplsLdpLsrIdCisco' => {
+            'oid' => '1.3.6.1.4.1.9.10.65.1.1.1',
+            'snmpObjectName' => 'mplsLdpLsrId',
+            'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
+            'title' => 'MPLS LSR Cisco'
+          },
+          'mplsL3VpnConfiguredVrfs' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.1.1',
+            'snmpObjectName' => 'mplsL3VpnConfiguredVrfs',
+            'title' => 'MPLS VRFs Configured'
+          },
+          'mplsL3VpnActiveVrfs' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.1.2',
+            'snmpObjectName' => 'mplsL3VpnActiveVrfs',
+            'title' => 'MPLS VRFs Active'
+          },
+          'mplsL3VpnConnectedInterfaces' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.1.3',
+            'snmpObjectName' => 'mplsL3VpnConnectedInterfaces',
+            'title' => 'MPLS Connected Interfaces'
+          },
         }
       },
       'nodeConfiguration' => {
@@ -230,43 +269,7 @@
   	},
   },
   'systemHealth' => {
-    'sections' => 'cdp,cpu_cpm,entityMib,ciscoAsset,addressTable,bgpPeer,ospfNbr,fanStatus,psuStatus,tempStatus',
-    'sys' => {
-      'cpu_cpm' => {
-        'indexed' => 'cpmCPUTotalPhysicalIndex',        
-        'headers' => 'cpmCPUTotal1min,cpmCPUTotal5min',
-        'index_headers' => 'cpmCPUTotalPhysicalIndex',
-        'snmp' => {
-          'cpmCPUTotalPhysicalIndex' => {
-            'oid' => 'cpmCPUTotalPhysicalIndex',
-            'title' => 'Entity Physical Index'
-          },
-          'cpmCPUTotal1min' => {
-            'oid' => 'cpmCPUTotal1minRev',
-            'title' => 'CPU Total 1min'
-          },
-          'cpmCPUTotal5min' => {
-            'oid' => 'cpmCPUTotal5minRev',
-            'title' => 'CPU Total 5min'
-          },
-        },
-      },
-    },
-    'rrd' => {
-      'cpu_cpm' => {
-        'indexed' => 'true',
-        'graphtype' => 'cpu-cpm',
-        'threshold' => 'cpu_cpm',
-        'snmp' => {
-          'cpmCPUTotal1min' => {
-            'oid' => 'cpmCPUTotal1minRev',
-          },
-          'cpmCPUTotal5min' => {
-            'oid' => 'cpmCPUTotal5minRev',
-          },
-        },
-      },
-    }
+    'sections' => 'Cisco_CBQoS,cpu_cpm,cempMemPool,ciscoMemoryPool,cdp,entityMib,ciscoAsset,addressTable,bgpPeer,ospfNbr,fanStatus,psuStatus,tempStatus,mplsVpnVrf,mplsL3VpnVrf,mplsL3VpnIfConf,mplsVpnInterface,mplsL3VpnVrfRT,mplsVpnVrfRouteTarget,mplsLdpEntity',
   },
   #'environment' => {
   #  'sys' => {
@@ -325,6 +328,7 @@
   'interface' => {
   	'sys' => {
   		'standard' => {
+      	'headers' => 'ifIndex,ifDescr,Description,ifAdminStatus,ifOperStatus,ifType,ifPhysAddress,ifSpeed,ifHighSpeed,ifLastChange,collect,nocollect',
   			'snmp' => {
   				'ifOperStatus' => {
   					'replace' => {
@@ -623,10 +627,10 @@
   		  'PRINT:perPUsedMem:AVERAGE:ProcMemUsed=%1.2lf',
   		  'PRINT:perPFreeMem:AVERAGE:ProcMemFree=%1.2lf'
   		],
-      'env_temp' => [
-        'DEF:currentTemp=$database:currentTemp:AVERAGE',
-        'PRINT:currentTemp:AVERAGE:currentTemp=%1.2lf',
-      ],
+      #'env_temp' => [
+      #  'DEF:currentTemp=$database:currentTemp:AVERAGE',
+      #  'PRINT:currentTemp:AVERAGE:currentTemp=%1.2lf',
+      #],
       'cpu_cpm' => [
         'DEF:cpmCPUTotal5min=$database:cpmCPUTotal5min:AVERAGE',
         'PRINT:cpmCPUTotal5min:AVERAGE:cpmCPUTotal5min=%1.2lf',
@@ -701,8 +705,8 @@
         'DEF:status=$database:ifOperStatus:AVERAGE',
         'CDEF:inputBits=input,8,*',
         'CDEF:outputBits=output,8,*',
-        'CDEF:inputUtil=inputBits,$speed,/,100,*',
-        'CDEF:outputUtil=outputBits,$speed,/,100,*',
+        'CDEF:inputUtil=inputBits,$inSpeed,/,100,*',
+        'CDEF:outputUtil=outputBits,$outSpeed,/,100,*',
         'CDEF:totalUtil=outputUtil,inputUtil,+,2,/',
         'PRINT:status:AVERAGE:availability=%1.2lf',
         'PRINT:inputUtil:AVERAGE:inputUtil=%1.2lf',

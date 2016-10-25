@@ -1,6 +1,4 @@
 #
-## $Id: Auth.pm,v 8.10 2012/11/27 00:23:20 keiths Exp $
-#
 #    Auth.pm - Web authorization libraries and routines
 #
 #    Copyright (C) 2005 Robert W. Smith
@@ -59,13 +57,12 @@
 #		exit 0 unless $AU->loginout(type=>$Q->{auth_type},username=>$Q->{auth_username},
 #					password=>$Q->{auth_password},headeropts=>$headeropts) ;
 #
-
 package Auth;
-use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
+our $VERSION = "1.2.0";
 
+use strict;
+use vars qw(@ISA @EXPORT);
 use Exporter;
-
-our $VERSION = "1.1.1";
 
 @ISA = qw(Exporter);
 
@@ -88,29 +85,24 @@ our $VERSION = "1.1.1";
 use FindBin;
 use lib "$FindBin::Bin/../lib";
 
-use strict;
-
 my $C;
 
 # import external symbols from NMIS module
 use NMIS;
 use func;
 use notify;											# for auth lockout emails
+use MIME::Base64;
 
 use Data::Dumper;
 $Data::Dumper::Indent = 1;
+
+use CGI qw(:standard);										# needed for current url lookup, http header, plus td/tr/bla_field helpery
 
 # import additional modules
 use Time::ParseDate;
 use File::Basename;
 
 use Crypt::PasswdMD5;						# for the apache-specific md5 crypt flavour
-
-# I prefer the use of the library when debugging the resulting HTML script
-# either one will work
-use CGI::Pretty qw(:standard form *table *Tr *td center b h1 h2);
-$CGI::Pretty::INDENT = "  ";
-$CGI::Pretty::LINEBREAK = "\n";
 
 # for handling errors in javascript
 use JSON::XS;
@@ -249,11 +241,11 @@ sub CheckAccess {
 
 	# Authorization failed--put access denied page and stop
 
-	print header({type=>'text/html',expires=>'now'}) if $option eq 'header'; # add header
+	print CGI::header({type=>'text/html',expires=>'now'}) if $option eq 'header'; # add header
 
-	print table(Tr(td({class=>'Error',align=>'center'},"Access denied")),
-			Tr(td("Authorization required to access this function")),
-			Tr(td("Requested access identifier is \'$cmd\'"))
+	print CGI::table(CGI::Tr(CGI::td({class=>'Error',align=>'center'},"Access denied")),
+			CGI::Tr(CGI::td("Authorization required to access this function")),
+			CGI::Tr(CGI::td("Requested access identifier is \'$cmd\'"))
 		);
 
 	exit 0;
@@ -287,7 +279,7 @@ sub get_cookie_token
 	my($user_name) = @_;
 
 	my $token;
-	my $remote_addr = remote_addr();
+	my $remote_addr = CGI::remote_addr();
 	if( $self->{config}{auth_debug} ne '' && $self->{config}{auth_debug_remote_addr} ne '' ) {
 		$remote_addr = $self->{config}{auth_debug_remote_addr};
 	}
@@ -326,7 +318,7 @@ sub get_cookie
 {
 	my $self = shift;
 	my $cookie;
-	$cookie = cookie( $self->get_cookie_name() );
+	$cookie = CGI::cookie( $self->get_cookie_name() );
 	logAuth("get_cookie: got cookie $cookie") if $debug;
 	return $cookie;
 }
@@ -381,7 +373,7 @@ sub generate_cookie {
 	}
 
 	my $domain = $self->get_cookie_domain();
-	my $cookie = cookie( {-name=> $self->get_cookie_name(), -domain=>$domain, -value=>$value, -expires=>$expires} ) ;
+	my $cookie = CGI::cookie( {-name=> $self->get_cookie_name(), -domain=>$domain, -value=>$value, -expires=>$expires} ) ;
 
 	return $cookie;
 }
@@ -440,11 +432,13 @@ sub user_verify {
 			$exit = $self->_ms_ldap_verify($u,$p,0);
 
 		} elsif ( $auth eq "ms-ldaps" ) {
-		### 2013-05-27 keiths, Change from Mateusz Kwiatkowski
+		  ### 2013-05-27 keiths, Change from Mateusz Kwiatkowski
 			$exit = $self->_ms_ldap_verify($u,$p,1);
-
 		} elsif ( $auth eq "novell-ldap" ) {
 			$exit = _novell_ldap_verify($u,$p,0);
+		} elsif ( $auth eq "connectwise" ) {
+			$exit = $self->_connectwise_verify($u,$p);
+		}
 	#	} elsif ( defined( $C->{'web-htpasswd-file'} ) ) {
 	#		$rv = _file_verify($C->{'web-htpasswd-file'},$u,$p,1);
 	#		return $rv if($rv);
@@ -454,7 +448,7 @@ sub user_verify {
 	#	} elsif ( defined( $C->{'web-unix-password-file'} ) ) {
 	#		$rv = file_verify($C->{'web-unix-password-file'},$u,$p,3);
 	#		return $rv if($rv);
-		}
+	# }
 
 		if ($exit) {
 			#Redundant logging
@@ -792,6 +786,77 @@ sub _ms_ldap_verify {
 	return 0; # not found
 }
 
+#----------------------------------
+# ConnectWise API  verify username/password
+#
+# VERSION 1.0.0 20160916 Mark Henry for Opmantek
+# This section was inspired by a code sample
+# provided by Robert Staats written using
+# REST::Client
+#
+sub _connectwise_verify
+{
+	my $self = shift;
+	my($u, $p) = @_;
+	my $protocol = 'https'; #Connectwise API requires validate call to be HTTPS
+
+	eval { require Mojo::UserAgent; };
+	if ($@)
+	{
+		logAuth("ERROR Connectwise authentication method requires Mojo::UserAgent but module not available: $@!");
+		return 0;
+	}
+
+	logAuth("DEBUG start sub _connectwise_verify") if $debug;
+
+	# The bulk of what we need comes from Config.nmis
+	my $cw_server = $C->{auth_cw_server};
+	my $company_id = $C->{auth_cw_company_id};
+	my $public_key = $C->{auth_cw_public_key};
+	my $private_key = $C->{auth_cw_private_key};
+
+	if ($cw_server eq "" || $company_id eq "" || $public_key eq "" || $private_key eq "") {
+		logAuth("ERROR one or more required ConnectWise variables are missing from Config.nmis");
+		return 0;
+	}
+
+	# Build API call to ConnectWise
+	# This is static, builds Authorization per Connectwise API
+	my $headers = {"Content-type" => 'application/json', Accept => 'application/json', Authorization => 'Basic ' . encode_base64($company_id . '+' . $public_key . ':' . $private_key,'')};
+
+	logAuth("DEBUG built headers") if $debug;
+
+	my $client = Mojo::UserAgent->new();
+	logAuth("DEBUG created Mojo::UserAgent") if $debug;
+
+	my $request_body = "{email: \"$u\",password: \"$p\"}";
+	my $urlValidateCredentials = $protocol . "://" . $cw_server. "/v4_6_release/apis/3.0/company/contacts/validatePortalCredentials";
+	my $responseContent = $client->post($urlValidateCredentials => $headers => $request_body);
+	logAuth("DEBUG created client->POST") if $debug;
+
+	my $response = $responseContent->success();
+	logAuth("DEBUG got responseContent->success") if $debug;
+	if ($response) {
+		my $body = decode_json($response->body());
+		logAuth("DEBUG response->body converted from JSON") if $debug;
+
+		if ($body->{'success'}) {
+			# permitted
+			logAuth("INFO Connectwise Login Successful for $u ContactId: ".$body->{'contactId'});
+			return 1;
+		} else {
+			logAuth("ERROR Connectwise Login Failed for $u Reply: ".$body->{'success'});
+			return 0;
+		}
+	} else {
+		logAuth("ERROR Connectwise response failed");
+		return 0;
+	}
+
+	# How did I get down here?
+	return 0;
+}
+
 
 ##########################################################################
 #
@@ -820,7 +885,7 @@ sub do_login {
 	my $url = $subcgi->url(-absolute => 1);
 
 
-	if( http("X-Requested-With") eq "XMLHttpRequest" )
+	if( CGI::http("X-Requested-With") eq "XMLHttpRequest" )
 	{
 		# forward url will have a function in it, we want to go back to regular nmis
 		# my $url_no_forward = url(-base=>1) . $C->{'<cgi_url_base>'} . "/nmiscgi.pl?auth_type=login$configfile_name";
@@ -837,7 +902,7 @@ EOHTML
 	}
 	my $cookie = $self->generate_cookie(user_name => "remove", expires => "now", value => "remove" );
 	logAuth("DEBUG: do_login: sending cookie to remove existing cookies=$cookie") if $debug;
-	print header(-target=>"_top", -type=>"text/html", -expires=>'now', -cookie=>[$cookie]);
+	print CGI::header(-target=>"_top", -type=>"text/html", -expires=>'now', -cookie=>[$cookie]);
 
 	print qq
 |<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
@@ -866,31 +931,31 @@ EOHTML
 
 	print $self->do_login_banner();
 
-	print start_form({method=>"POST", action=> $url, target=>"_top"});
+	print CGI::start_form({method=>"POST", action=> $url, target=>"_top"});
 
-	print start_table({class=>""});
+	print CGI::start_table({class=>""});
 
 	if ( $C->{'company_logo'} ne "" ) {
-		print Tr(td({class=>"info Plain",colspan=>'2'}, qq|<img class="logo" src="$C->{'company_logo'}"/>|));
+		print CGI::Tr(CGI::td({class=>"info Plain",colspan=>'2'}, qq|<img class="logo" src="$C->{'company_logo'}"/>|));
 	}
 
 	my $motd = "Authentication required: Please log in with your appropriate username and password in order to gain access to this system";
 	$motd = $C->{auth_login_motd} if $C->{auth_login_motd} ne "";
 
-	print Tr(td({class=>'infolft Plain',colspan=>'2'},$motd));
+	print CGI::Tr(CGI::td({class=>'infolft Plain',colspan=>'2'},$motd));
 
-	print Tr(td({class=>'info Plain'},"Username") . td({class=>'info Plain'},textfield({name=>'auth_username'})));
-	print Tr(td({class=>'info Plain'},"Password") . td({class=>'info Plain'},password_field({name=>'auth_password'}) ));
-	print Tr(td({class=>'info Plain'},"&nbsp;") . td({class=>'info Plain'},submit({name=>'login',value=>'Login'}) ));
+	print CGI::Tr(CGI::td({class=>'info Plain'},"Username") . CGI::td({class=>'info Plain'},textfield({name=>'auth_username'})));
+	print CGI::Tr(CGI::td({class=>'info Plain'},"Password") . CGI::td({class=>'info Plain'},password_field({name=>'auth_password'}) ));
+	print CGI::Tr(CGI::td({class=>'info Plain'},"&nbsp;") . CGI::td({class=>'info Plain'},submit({name=>'login',value=>'Login'}) ));
 
 
 	if ( $C->{'auth_sso_domain'} ne "" and $C->{'auth_sso_domain'} ne ".domain.com" ) {
-		print Tr(td({class=>"info",colspan=>'2'}, "Single Sign On configured with \"$C->{'auth_sso_domain'}\""));
+		print CGI::Tr(CGI::td({class=>"info",colspan=>'2'}, "Single Sign On configured with \"$C->{'auth_sso_domain'}\""));
 	}
 
-	print Tr(td({colspan=>'2'},p({style=>"color: red"}, "&nbsp;$msg&nbsp;"))) if $msg ne "";
+	print CGI::Tr(CGI::td({colspan=>'2'},p({style=>"color: red"}, "&nbsp;$msg&nbsp;"))) if $msg ne "";
 
-	print end_table;
+	print CGI::end_table;
 
 	print hidden(-name=>'conf', -default=>$config, -override=>'1');
 
@@ -903,7 +968,7 @@ EOHTML
 		}
 	}
 
-	print end_form;
+	print CGI::end_form();
 
 	print "\n      </div>\n";
 
@@ -929,7 +994,7 @@ EOHTML
     </div>
 |;
 
-	print end_html;
+	print CGI::end_html;
 }
 
 ##############################################################################
@@ -950,11 +1015,11 @@ sub do_force_login {
 		$config = "&conf=$config";
 	}
 
-	my $url = url(-base=>1) . $C->{'<cgi_url_base>'} . "/nmiscgi.pl?auth_type=login$config";
+	my $url = CGI::url(-base=>1) . $C->{'<cgi_url_base>'} . "/nmiscgi.pl?auth_type=login$config";
 
 	# if this request is coming through an AJAX'Y method, respond in a different mannor that commonV8.js will understand
 	# and redirect for us
-	if( http("X-Requested-With") eq "XMLHttpRequest" )
+	if( CGI::http("X-Requested-With") eq "XMLHttpRequest" )
 	{
 		my $url_no_forward = $url;
 		my $ret = { name => "JSONRequestError", message => "Authentication Error", redirect_url => $url_no_forward };
@@ -975,15 +1040,15 @@ EOHTML
 
 	$javascript = "function redir() {} " if($C->{'web-auth-debug'});
 
-	print header({ target=>'_top', expires=>"now" })."\n";
-	print start_html({ title =>"Login Required",
+	print CGI::header({ target=>'_top', expires=>"now" })."\n";
+	print CGI::start_html({ title =>"Login Required",
 						expires => "now",  script => $javascript,
 						onload => "redir()", bgcolor=>'#CFF' }),"\n";
-	print h1("Authentication required")."\n";
-	print "Please ".a({href=>$url},"login")	." before continuing.\n";
+	print CGI::h1("Authentication required")."\n";
+	print "Please ".CGI::a({href=>$url},"login")	." before continuing.\n";
 
 	print "<!-- $err -->\n";
-	print end_html;
+	print CGI::end_html;
 }
 
 #----------------------------------
@@ -1000,7 +1065,7 @@ sub do_logout {
 	# ensure the  conf argument is kept
 	param(conf=>$config) if ($config);
 	CGI::delete('auth_type'); 		# but don't keep that one
-	my $url = url(-full=>1, -query=>1);
+	my $url = CGI::url(-full=>1, -query=>1);
 	$url =~ s!^[^:]+://!//!;
 
 	my $javascript = "function redir() { window.location = '" . $url ."'; }";
@@ -1008,7 +1073,7 @@ sub do_logout {
 
 	logAuth("INFO logout of user=$self->{user} conf=$config");
 
-	print header({ -target=>'_top', -expires=>"5s", -cookie=>[$cookie] })."\n";
+	print CGI::header({ -target=>'_top', -expires=>"5s", -cookie=>[$cookie] })."\n";
 	#print start_html({
 	#	-title =>"Logout complete",
 	#	-expires => "5s",
@@ -1047,16 +1112,16 @@ $javascript
 
 	print $self->do_login_banner();
 
-	print start_table();
-	print Tr(td({class=>"info Plain"}, p(h2("Logged out of system") .
-	p("Please " . a({href=>url(-full=>1) . ""},"go back to the login page") ." to continue."))));
+	print CGI::start_table();
+	print CGI::Tr(CGI::td({class=>"info Plain"}, CGI::p(CGI::h2("Logged out of system") .
+	CGI::p("Please " . CGI::a({href=>CGI::url(-full=>1) . ""},"go back to the login page") ." to continue."))));
 
-	print end_table;
+	print CGI::end_table;
 
 	print "    </div>\n";
 	print "  </div>\n";
 
-	print end_html;
+	print CGI::end_html;
 }
 
 #####################################################################
@@ -1076,8 +1141,8 @@ sub do_login_banner {
 	#print STDERR "DEBUG AUTH banner=$banner_string self->{banner}=$self->{banner}\n";
 
 	my $logo = qq|<a href="http://www.opmantek.com"><img height="20px" width="20px" class="logo" src="$C->{'nmis_favicon'}"/></a>|;
-	push @banner,div({class=>'ui-dialog-titlebar ui-dialog-header ui-corner-top ui-widget-header lrg pad'},$logo, $banner_string);
-	push @banner,div({class=>'title2'},"Network Management Information System");
+	push @banner,CGI::div({class=>'ui-dialog-titlebar ui-dialog-header ui-corner-top ui-widget-header lrg pad'},$logo, $banner_string);
+	push @banner,CGI::div({class=>'title2'},"Network Management Information System");
 
 	return @banner;
 }
@@ -1207,8 +1272,8 @@ sub loginout {
 
 	my $maxtries = $C->{auth_lockout_after};
 
-	if (defined($username) && $username ne '') 
-	{ 
+	if (defined($username) && $username ne '')
+	{
 		# someone is trying to log in
 		if ($maxtries)
 		{
@@ -1222,7 +1287,7 @@ sub loginout {
 			}
 		}
 		logAuth("DEBUG: verifying $username") if $debug;
-		if( $self->user_verify($username,$password)) 
+		if( $self->user_verify($username,$password))
 		{
 			#logAuth("DEBUG: user verified $username") if $debug;
 			#logAuth("self.privilevel=$self->{privilevel} self.config=$self->{config} config=$config") if $debug;
@@ -1231,7 +1296,7 @@ sub loginout {
 			$self->SetUser($username);
 			# and reset the failure counter
 			$self->update_failure_counter(user => $username, action => 'reset') if ($maxtries);
-			
+
 			# handle default privileges or not.
 			if ( $self->{priv} eq "" and ( $C->{auth_default_privilege} eq ""
 																		 or getbool($C->{auth_default_privilege},"invert")) ) {
@@ -1274,15 +1339,15 @@ sub loginout {
 							hello => $C->{mail_domain},
 							usetls => $C->{mail_use_tls},
 							ipproto => $C->{mail_server_ipproto},
-							
+
 							username => $C->{mail_user},
 							password => $C->{mail_password},
-							
+
 							# and params for making the message on the go
 							to => $C->{server_admin},
 							from => $C->{mail_from},
 							subject => "Account \"$username\" locked after $newcount failed logins",
-							body => qq|The account \"$username\" on $C->{server_name} has exceeded the maximum number 
+							body => qq|The account \"$username\" on $C->{server_name} has exceeded the maximum number
 of failed login attempts and was locked.
 
 To re-enable this account visit $C->{nmis_host_protocol}://$C->{nmis_host}$C->{"<cgi_url_base>"}/tables.pl?act=config_table_menu&table=Users&widget=false and select the "reset login count" option. |,
@@ -1351,7 +1416,7 @@ sub update_failure_counter
 {
 	my ($self, %args) = @_;
 	my ($user, $action) = @args{"user","action"};
-			
+
 	return "cannot update failure counter without valid user argument!" if (!$user);
 	return "cannot update failure counter without valid action argument!" if (!$action or $action !~ /^(inc|reset)$/);
 
@@ -1384,19 +1449,22 @@ sub update_failure_counter
 	open(F,">$userstatefile") or return "cannot write $userstatefile: $!";
 	print F encode_json($userdata);
 	close(F);
+	setFileProtDiag(file => $userstatefile, username => $C->{nmis_user}, 
+									groupname => $C->{nmis_group},
+									permission => $C->{os_fileperm}); # ignore problems with that
 
 	return (undef, $userdata->{count});
 }
 
 # returns the current failure counter for the given user
-# args: user, required. 
+# args: user, required.
 # returns: (undef,counter) or error message
 sub get_failure_counter
 {
 	my ($self, %args) = @_;
 	my $user = $args{"user"};
 	return "cannot get failure counter without valid user argument!" if (!$user);
-			
+
 	my $statedir = $C->{'<nmis_var>'}."/nmis_system/auth_failures";
 	createDir($statedir) if (!-d $statedir);
 
@@ -1414,7 +1482,7 @@ sub get_failure_counter
 	}
 	return (undef, $userdata->{count});
 }
-	
+
 
 #----------------------------------
 

@@ -44,11 +44,12 @@ taillines=50
 
 helptext() {
 	echo NMIS Shell Options
-	echo "    $0 master"
 	echo "    $0 escalate"
 	echo "    $0 summary"
 	echo "    $0 threshold"
+	echo "    $0 purge"
 	echo "    $0 apache"
+	echo "    $0 master"
 	echo "    $0 event"
 	echo "    $0 log"
 	echo "    $0 crontab"
@@ -79,6 +80,11 @@ fi
 if [ "$3" = "model" ]
 then
 	MODEL="model=true"
+fi
+
+if [ "$3" = "9" ]
+then
+	DEBUG="debug=9"
 fi
 
 if [ "$3" = "debug" ]
@@ -148,6 +154,12 @@ fi
 if [ "$1" = "escalate" ]
 then
 	$nmis type=escalate debug=true
+	exit 0
+fi
+
+if [ "$1" = "purge" ]
+then
+	$nmis type=purge debug=true
 	exit 0
 fi
 

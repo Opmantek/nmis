@@ -34,9 +34,6 @@
   		'database' => {
   			'common-model' => 'database',
   		},
-  		'calls' => {
-  			'common-model' => 'calls'
-  		},
   		'threshold' => {
   			'common-model' => 'threshold'
   		},
@@ -51,7 +48,16 @@
   		},
   		'event' => {
   			'common-model' => 'event'
-  		}
+  		},
+      'asset' => {
+        'common-model' => 'Cisco-asset'
+      },
+      'neighbor' => {
+        'common-model' => 'Cisco-neighbor'
+      },
+      'vlan' => {
+        'common-model' => 'Cisco-vlan'
+      },
   	}
   },
   'alerts' => {
@@ -109,14 +115,128 @@
             'option' => 'counter,0:U'
           },
           'RouteNumber' => {
-            'oid' => 'ipCidrRouteNumber'
+            'oid' => 'inetCidrRouteNumber',
+  					'replace' => {
+  						'335544320' => '0',
+  					},            
           }
   			},
   			'threshold' => 'cpu,mem-proc',
   			'graphtype' => 'cpu,mem-proc,topo,routenumber'
-  		}
+  		},
+      'mib2ip' => {
+        'graphtype' => 'ip,frag',
+        'snmp' => {
+          'ipInAddrErrors' => {
+            'oid' => 'ipInAddrErrors',
+            'option' => 'counter,0:U'
+          },
+          'ipFragCreates' => {
+            'oid' => 'ipFragCreates',
+            'option' => 'counter,0:U'
+          },
+          'ipInDiscards' => {
+            'oid' => 'ipInDiscards',
+            'option' => 'counter,0:U'
+          },
+          'ipInReceives' => {
+            'oid' => 'ipInReceives',
+            'option' => 'counter,0:U'
+          },
+          'ipFragOKs' => {
+            'oid' => 'ipFragOKs',
+            'option' => 'counter,0:U'
+          },
+          'ipInDelivers' => {
+            'oid' => 'ipInDelivers',
+            'option' => 'counter,0:U'
+          },
+          'ipReasmFails' => {
+            'oid' => 'ipReasmFails',
+            'option' => 'counter,0:U'
+          },
+          'ipReasmReqds' => {
+            'oid' => 'ipReasmReqds',
+            'option' => 'counter,0:U'
+          },
+          'ipFragFails' => {
+            'oid' => 'ipFragFails',
+            'option' => 'counter,0:U'
+          },
+          'ipOutRequests' => {
+            'oid' => 'ipOutRequests',
+            'option' => 'counter,0:U'
+          },
+          'ipOutNoRoutes' => {
+            'oid' => 'ipOutNoRoutes',
+            'option' => 'counter,0:U'
+          },
+          'ipInHdrErrors' => {
+            'oid' => 'ipInHdrErrors',
+            'option' => 'counter,0:U'
+          },
+          'ipForwDatagrams' => {
+            'oid' => 'ipForwDatagrams',
+            'option' => 'counter,0:U'
+          },
+          'ipOutDiscards' => {
+            'oid' => 'ipOutDiscards',
+            'option' => 'counter,0:U'
+          },
+          'ipReasmOKs' => {
+            'oid' => 'ipReasmOKs',
+            'option' => 'counter,0:U'
+          },
+          'ipInUnknownProtos' => {
+            'oid' => 'ipInUnknownProtos',
+            'option' => 'counter,0:U'
+          }
+        },
+      }
   	},
   	'sys' => {
+      'extra' => {
+        'snmp' => {
+          'rttMonApplResponder' => {
+            'oid' => '1.3.6.1.4.1.9.9.42.1.1.13.0',
+            'replace' => {
+              'noSuchObject' => 'N/A',
+              '1' => 'enabled',
+              '2' => 'disabled'
+            },
+            'snmpObjectName' => 'rttMonApplResponder',
+            'title' => 'IPSLA Responder'
+          },
+          'rttMonApplVersion' => {
+            'oid' => '1.3.6.1.4.1.9.9.42.1.1.1.0',
+            'replace' => {
+              'noSuchObject' => 'N/A',
+            },
+            'snmpObjectName' => 'rttMonApplVersion',
+            'title' => 'IPSLA Version'
+          },
+          'softwareImage' => {
+            'calculate' => '$r =~ /CW_IMAGE\\$(.+)\\$/; $r = $1',
+            'oid' => '1.3.6.1.4.1.9.9.25.1.1.1.2.2',
+            'snmpObjectName' => 'ciscoImageString',
+            'title' => 'Software Image'
+          },
+          'softwareVersion' => {
+            'calculate' => '$r =~ /CW_VERSION\\$(.+)\\$/; $r = $1',
+            'oid' => '1.3.6.1.4.1.9.9.25.1.1.1.2.5',
+            'snmpObjectName' => 'ciscoVersionString',
+            'title' => 'Software Version'
+          },
+          'TimeSinceTopologyChange' => {
+            'oid' => 'dot1dStpTimeSinceTopologyChange',
+            'Title' => 'Time Since STP Topology Change',
+            'replace' => {
+              'noSuchObject' => 'N/A',
+              'noSuchInstance' => 'N/A',
+            }
+          },
+        }
+      },
   		'standard' => {
   			'snmp' => {
   				'sysLocation' => {
@@ -150,7 +270,7 @@
   				},
   				'sysName' => {
   					'oid' => 'sysName'
-  				}
+  				},
   			}
   		}
   	},
@@ -158,53 +278,8 @@
   	'nodegraph' => 'health,response,cpu,ip,mem-proc,routenumber,topo'
   },
   'systemHealth' => {
-    'sections' => 'cdp,env-temp,vtpVlan',
+    'sections' => 'cdp,entityMib,env-temp,vtpVlan',
     'sys' => {
-      'cdp' => {
-        'headers' => 'ifDescr,cdpCacheAddress,cdpCacheDeviceId,cdpCacheVersion,cdpCacheDevicePort,cdpCachePlatform',
-        'index_oid' => '1.3.6.1.4.1.9.9.23.1.2.1.1.6',
-        'index_regex' => '\\.(\\d+\.\\d+)$',
-        'indexed' => 'cdpCacheDeviceId',
-        'snmp' => {
-          'ifDescr' => {
-            'title' => 'Local Interface'
-          },
-          'cdpCacheAddressType' => {
-            'oid' => '1.3.6.1.4.1.9.9.23.1.2.1.1.3',
-            'sysObjectName' => 'cdpCacheAddressType',
-            'replace' => {
-              '1' => 'ip',
-            },
-            'title' => 'Neighbor AddressType'
-          },
-          'cdpCacheAddress' => {
-            'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
-            'oid' => '1.3.6.1.4.1.9.9.23.1.2.1.1.4',
-            'sysObjectName' => 'cdpCacheAddress',
-            'title' => 'Neighbor Address'
-          },
-          'cdpCacheVersion' => {
-            'oid' => '1.3.6.1.4.1.9.9.23.1.2.1.1.5',
-            'sysObjectName' => 'cdpCacheVersion',
-            'title' => 'Neighbor Version'
-          },
-          'cdpCacheDeviceId' => {
-            'oid' => '1.3.6.1.4.1.9.9.23.1.2.1.1.6',
-            'sysObjectName' => 'cdpCacheDeviceId',
-            'title' => 'Neighbor DeviceId'
-          },
-          'cdpCacheDevicePort' => {
-            'oid' => '1.3.6.1.4.1.9.9.23.1.2.1.1.7',
-            'sysObjectName' => 'cdpCacheDevicePort',
-            'title' => 'Neighbor Interface'
-          },
-          'cdpCachePlatform' => {
-            'oid' => '1.3.6.1.4.1.9.9.23.1.2.1.1.8',
-            'sysObjectName' => 'cdpCachePlatform',
-            'title' => 'Neighbor Platform'
-          },
-        }
-      },
       'env-temp' => {
         'indexed' => 'entSensorStatus',
         'headers' => 'tempDescr,currentTemp',
@@ -248,56 +323,6 @@
           },
         },
       },
-      'vtpVlan' => {
-        'headers' => 'vtpVlanName,vtpVlanState,vtpVlanType,vtpVlanMtu,vtpVlanIfIndex,ifDescr',
-        'index_regex' => '\\.(\\d+\.\\d+)$',
-        'indexed' => 'vtpVlanState',
-        'snmp' => {
-          'vtpVlanName' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.4',
-            'title' => 'VLAN Name'
-          },
-          'vtpVlanIndex' => {
-            'title' => 'VLAN'
-          },
-          'vtpVlanState' => {
-            'oid' => 'vtpVlanState',
-            'replace' => {
-              '1' => 'operational',
-              '2' => 'suspended',
-              '3' => 'mtuTooBigForDevice',
-              '4' => 'mtuTooBigForTrunk',
-            },
-            'title' => 'VLAN State'
-          },
-          'vtpVlanType' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.3',
-            'replace' => {
-              '1' => 'ethernet',
-              '2' => 'fddi',
-              '3' => 'tokenRing',
-              '4' => 'fddiNet',
-              '5' => 'trNet',
-              '6' => 'deprecated',
-            },
-            'title' => 'VLAN Type'
-          },
-          'vtpVlanMtu' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.5',
-            'title' => 'VLAN MTU'
-          },
-          'vtpVlanIfIndex' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.18',
-            'replace' => {
-              '0' => 'N/A',
-            },
-            'title' => 'VLAN ifIndex'
-          },
-          'ifDescr' => {
-            'title' => 'ifDescr'
-          },
-        }
-      },
     },
     'rrd' => {
       'env-temp' => {
@@ -316,6 +341,7 @@
   'interface' => {
   	'sys' => {
   		'standard' => {
+      	'headers' => 'ifIndex,ifDescr,Description,ifAdminStatus,ifOperStatus,ifType,ifPhysAddress,ifSpeed,ifHighSpeed,ifLastChange,collect,nocollect',
   			'snmp' => {
   				'ifOperStatus' => {
   					'replace' => {
@@ -612,7 +638,7 @@
   		'ifDescr' => 'sublayer|null|controller',
   		'Description' => '^#',
   		'noDescription' => 'true',
-  		'ifType' => 'other|softwareloopback|propVirtual|slip'
+  		'ifType' => 'other|softwareloopback|slip'
   	}
   },
   'stats' => {
@@ -706,8 +732,8 @@
         'DEF:status=$database:ifOperStatus:AVERAGE',
         'CDEF:inputBits=input,8,*',
         'CDEF:outputBits=output,8,*',
-        'CDEF:inputUtil=inputBits,$speed,/,100,*',
-        'CDEF:outputUtil=outputBits,$speed,/,100,*',
+        'CDEF:inputUtil=inputBits,$inSpeed,/,100,*',
+        'CDEF:outputUtil=outputBits,$outSpeed,/,100,*',
         'CDEF:totalUtil=outputUtil,inputUtil,+,2,/',
         'PRINT:status:AVERAGE:availability=%1.2lf',
         'PRINT:inputUtil:AVERAGE:inputUtil=%1.2lf',

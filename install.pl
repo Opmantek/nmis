@@ -27,10 +27,6 @@
 #  http://support.opmantek.com/users/
 #
 # *****************************************************************************
-
-# TODO:
-# * support for completely unattended install (silencing confirmations)
-# e.g. install.pl site=/usr/local/nmis8 fping=/usr/local/sbin/fping cpan=true
 use 5.10.1;
 
 # Load the necessary libraries
@@ -45,30 +41,44 @@ use Fcntl qw(:DEFAULT :flock);
 use File::Copy;
 use File::Find;
 use File::Basename;
+use File::Path;
 use Cwd;
 use POSIX qw(:sys_wait_h);
 use version 0.77;
+use Getopt::Std;
+
+my $me = basename($0);
+
+my $defsite = "/usr/local/nmis8";
+my $usage = qq!
+NMIS Copyright (C) Opmantek Limited (www.opmantek.com)
+This program comes with ABSOLUTELY NO WARRANTY;
+
+Usage: $me [-hydl] [-t /some/path|site=/some/path] [listdeps=0/1]
+
+-h:  show this help screen
+-d:  produce extra debug output and logs
+-l:  No installation, only show (missing) dependencies
+-t:  Installation target, default is $defsite
+-y:  non-interactive  mode, all questions are pre-answered
+     with the default choice\n\n!;
 
 # relax an overly strict umask but for the duration of the installation only
 # otherwise dirs and files that are created end up inaccessible for the nmis user...
 umask(0022);
 
-
 my $nmisModules;			# local modules used in our scripts
 
-if ( $ARGV[0] =~ /\-\?|\-h|--help/ ) {
-	printHelp();
-	exit 0;
-}
+die $usage if ( $ARGV[0] =~ /^-{\?|h|-help$/i );
+# let's prefer std -X flags, fall back to word=value style
+my (%options, %oldstyle);
+die $usage if (!getopts("yldt:", \%options));
+%oldstyle = getArguements(@ARGV) if (@ARGV);
 
-# Get some command line arguements.
-my %arg = getArguements(@ARGV);
-
-my $site = $arg{site} ? $arg{site} : "/usr/local/nmis8";
-my $listdeps = $arg{listdeps} =~ /1|true|yes/i;
-
-my $debug = $arg{debug}? 1 : 0;
-my %options;										# for future unattended mode
+my $site = $options{t} || $oldstyle{site} || $defsite;
+my $listdeps = $options{l} || ($oldstyle{listdeps} =~ /^(1|true|yes)$/i);
+my $debug = $options{d} || $oldstyle{debug};
+my $noninteractive = $options{y};
 
 die "This installer must be run with root privileges, terminating now!\n"
 		if ($> != 0);
@@ -87,7 +97,7 @@ else
 
 
 ###************************************************************************###
-printBanner("NMIS Installation Script");
+printBanner("NMIS Installer");
 my $hostname = `hostname -f`; chomp $hostname;
 
 # figure out where we install from; current dir, check the dirname of this command's invocation, or give up
@@ -144,11 +154,8 @@ and won't be able to make certain installation adjustments!
 We recommend that you check the NMIS Installation guide at
 https://community.opmantek.com/x/Dgh4
 for further info.\n\n");
-	print "Hit <Enter> to continue:\n";
-	my $x = <STDIN>;
+	&input_ok;
 }
-
-
 
 logInstall("Installation source is $src");
 
@@ -188,8 +195,8 @@ SELinux needs extensive configuration to work properly.\n
 In its default configuration it is known to interfere with NMIS,
 and we do therefore recommend that you disable SELinux for NMIS.
 
-See \"man 8 selinux\" for details.\n\nHit <Enter> to continue:\n";
-			my $x = <STDIN>;
+See \"man 8 selinux\" for details.\n";
+			&input_ok;
 		}
 	}
 	else
@@ -214,9 +221,10 @@ libio-socket-ssl-perl libwww-perl libnet-smtp-ssl-perl libnet-smtps-perl
 libcrypt-unixcrypt-perl libcrypt-rijndael-perl libuuid-tiny-perl libproc-processtable-perl libdigest-sha-perl
 libnet-ldap-perl libnet-snpp-perl libdbi-perl libtime-modules-perl
 libsoap-lite-perl libauthen-simple-radius-perl libauthen-tacacsplus-perl
-libauthen-sasl-perl rrdtool librrds-perl libsys-syslog-perl libtest-deep-perl dialog libui-dialog-perl));
+libauthen-sasl-perl rrdtool librrds-perl libsys-syslog-perl libtest-deep-perl dialog libui-dialog-perl libcrypt-des-perl libdigest-hmac-perl libclone-perl
+libexcel-writer-xlsx-perl libmojolicious-perl));
 
-	my @rhpackages = (qw(autoconf automake gcc cvs cairo cairo-devel
+	my @rhpackages = (qw(perl-core autoconf automake gcc cvs cairo cairo-devel
 pango pango-devel glib glib-devel libxml2 libxml2-devel gd gd-devel
 libXpm-devel libXpm openssl openssl-devel net-snmp net-snmp-libs
 net-snmp-utils net-snmp-perl perl-IO-Socket-SSL perl-Net-SSLeay
@@ -225,9 +233,11 @@ perl-libwww-perl perl-Net-DNS perl-Digest-SHA
 perl-DBI perl-Net-SMTPS perl-Net-SMTP-SSL perl-Time-modules
 perl-CGI net-snmp-perl perl-Proc-ProcessTable perl-Authen-SASL
 perl-Crypt-PasswdMD5 perl-Crypt-Rijndael perl-Net-SNPP perl-Net-SNMP perl-GD rrdtool
-perl-rrdtool perl-Test-Deep dialog perl-UI-Dialog
+rrdtool-perl perl-Test-Deep dialog
 perl-Excel-Writer-XLSX
+ perl-Digest-HMAC perl-Crypt-DES perl-Clone
 ));
+	# perl-UI-Dialog was only available in rpm/repoforge...
 
 	# cgi was removed from core in 5.20
 	if (version->parse($^V) >= version->parse("5.19.7"))
@@ -266,9 +276,7 @@ We recommend that you check our Wiki article on working around
 package installation without Internet access in that case:
 
 https://community.opmantek.com/x/boSG\n\n";
-
-		print "Hit <Enter> to continue:\n";
-		my $x = <STDIN>;
+		&input_ok;
 	}
 
 	if ($osflavour eq "debian" or $osflavour eq "ubuntu")
@@ -344,7 +352,7 @@ dependencies manually before NMIS can operate properly.\n\nHit <Enter> to contin
 
 		printBanner("Checking Dependencies...");
 
-		# a few packages are only available via the EPEL repo and others need repoforge/rpmfore, too
+		# a few packages are only available via the EPEL repo, others need more magic...
 		open(F,"/etc/redhat-release");
 		my $rhver =	<F>;
 		chomp $rhver;
@@ -364,6 +372,22 @@ dependencies manually before NMIS can operate properly.\n\nHit <Enter> to contin
 		}
 		close(F);
 
+		# first, disable the rpmforge/repoforge repo, it's unfortunately quite dead...
+		if ($enabled_repos{"rpmforge"})
+		{
+			$enabled_repos{"rpmforge"} = 0;
+			if (open(F, "/etc/yum.repos.d/rpmforge.repo"))
+			{
+				my $repodata = join("",<F>);
+				close F;
+				$repodata =~  s/enabled\s*=\s*1/enabled=0/g;
+				open(F, ">/etc/yum.repos.d/rpmforge.repo") or die "cannot open rpmforge.repo: $!\n";
+				print F $repodata;
+				close F;
+			}
+		}
+
+		my @needed;
 		for my $pkg (@rhpackages)
 		{
 			my $installcmd = "yum -y install $pkg";
@@ -374,7 +398,7 @@ dependencies manually before NMIS can operate properly.\n\nHit <Enter> to contin
 				$present_version = version->parse($1) if ($rpmstatus =~ /^\S+-(\d+\.\d+(\.\d+)?)/m);
 				$ispresent = 1;
 
-				# rrdtool and perl-rrdtool are doubly special - we need a recent enough version
+				# rrdtool and rrdtool-perl are doubly special - we need a recent enough version
 				$ispresent = 0
 						if (($pkg eq "rrdtool" or $pkg eq "rrdtool-perl")
 								and $present_version < version->parse("1.4.4"));
@@ -387,15 +411,17 @@ dependencies manually before NMIS can operate properly.\n\nHit <Enter> to contin
 				next;
 			}
 
-			# special handling for rpmforge packages
-			if ($pkg eq "fping" or $pkg eq "rrdtool" or $pkg eq "rrdtool-perl")
+			# special handling for certain packages: ghettoforge, epel
+			# and for centos/rh 6 mainly
+			if ($rhver == 6 and
+					($pkg eq "fping" or $pkg eq "rrdtool" or $pkg eq "rrdtool-perl"))
 			{
-				$installcmd = "yum -y --enablerepo=rpmforge-extras install $pkg";
-				$repo="rpmforge";
-				$reponame="RPMforge";
-				$repourl = "http://repoforge.org/";
+				$installcmd = "yum -y --enablerepo=gf-plus install $pkg";
+				$repo="gf";
+				$reponame="ghettoforge";
+				$repourl = "http://ghettoforge.org/";
 			}
-			# ditto for epel
+			# similar for epel
 			elsif ($pkg eq "perl-Net-SNMP" or $pkg eq "glib" or $pkg eq "glib-devel"
 						 or $pkg eq "perl-Crypt-Rijndael" or $pkg eq "perl-JSON-XS"
 						 or $pkg eq "perl-Net-SMTPS" or $pkg eq "perl-Net-SNPP"
@@ -412,18 +438,19 @@ dependencies manually before NMIS can operate properly.\n\nHit <Enter> to contin
 														repo => $repo,
 														reponame => $reponame,
 														repourl => $repourl };
+			push @needed, $pkg;				# would like to install them in order
 		}
 
 		if (keys %unresolved)
 		{
-			my $packages = join(" ",sort keys %unresolved);
+			my $packages = join(" ",@needed);
 			echolog("\n\nSome required packages are missing:
 $packages\n
 The installer can use $pkgmgr to download and install these packages.\n");
 
 			if (input_yn("Do you want to install these packages with $pkgmgr now?"))
 			{
-				for my $missing (keys %unresolved)
+				for my $missing (@needed)
 				{
 					my ($installcmd, $repo, $reponame, $repourl ) = @{$unresolved{$missing}}{qw(installcmd repo reponame repourl)};
 
@@ -437,8 +464,8 @@ your system does not have web access and thus cannot
 download anything from that repository.
 
 You will have to install $missing manually (downloadable
-from $repourl).\n\nHit <Enter> to continue:\n";
-							my $x = <STDIN>;
+from $repourl).\n";
+							&input_ok;
 							next;
 						}
 						else
@@ -475,8 +502,7 @@ dependencies manually before NMIS can operate properly.\n\n";
 							if ($unresolved{$missing}->{repourl});
 				}
 
-				print "Hit <Enter> to continue:\n";
-				my $x = <STDIN>;
+				&input_ok;
 			}
 		}
 	}
@@ -484,7 +510,7 @@ dependencies manually before NMIS can operate properly.\n\n";
 
 printBanner("Checking Perl Module Dependencies...");
 
-my ($isok,@missingones) = &checkCpan;
+my ($isok,@missingones) = &check_installed_modules;
 if (!$isok)
 {
 	print "The installer can use CPAN to install the missing Perl packages
@@ -505,6 +531,36 @@ and then restart the installer.\n\n";
 	else
 	{
 		echolog("Installing modules with CPAN");
+
+		# prime cpan if necessary: non-interactive, follow prereqs,
+		if (!-e $ENV{"HOME"}."/.cpan") # might be symlink
+		{
+			echolog("Performing initial CPAN configuration");
+			if ($noninteractive)
+			{
+				# no inputs, all defaults
+				execPrint('cpan');
+
+				# adjust options unsuitable for noninteractive work
+				open(F,"|cpan") or die "cannot fork cpan: $!\n";
+				print F "o conf prerequisites_policy follow\no conf commit\n";
+				close F;
+			}
+			else
+			{
+				# there doesn't seem an easy way to prime the cpan shell with args,
+				# then let interact with the user via stdin/stdout... and not all versions
+				# of cpan seem to start it automatically
+				print "\n
+If the CPAN configuration doesn't start automatically, then please
+enter 'o conf init' on the CPAN prompt. To return to the installer when done,
+please exit the CPAN\nshell with 'exit'.\n";
+				&input_ok;
+				system("cpan");
+			}
+			echolog("CPAN configuration complete, proceeding with module installation");
+		}
+
 		system("cpan ".join(" ",@missingones));  # can't use execprint as cpan is interactive
 	}
 }
@@ -564,8 +620,7 @@ for further info.\n\n";
 		else
 		{
 			echolog("\n\nContinuing the installation as requested. NMIS won't work correctly until you install rrdtool and RRDs!\n\n");
-			print "Please hit <Enter> to continue:\n";
-			my $x = <STDIN>;
+			&input_ok;
 		}
 	}
 }
@@ -584,7 +639,7 @@ if (!input_yn("OK to start installation/upgrade to $site?"))
 }
 
 ###************************************************************************###
-if ( -d $site ) 
+if ( -d $site )
 {
 	printBanner("Existing NMIS8 Installation detected");
 
@@ -604,14 +659,16 @@ If you say No here, the existing installation will be REMOVED and OVERWRITTEN!\n
 			&& input_yn("\nPlease confirm that you want to REMOVE the existing installation:"))
 	{
 		rename($site,"$site.unwanted") or die "Cannot rename $site to $site.unwanted: $!\n";
+		$installLog = "$site.unwanted/install.log";
+		$mustmovelog = 1;
 	}
 }
 
 my $isnewinstall;
-if ( not -d $site )
+if (!-d $site )
 {
 	$isnewinstall=1;
-	mkdir($site,0755) or die "cannot mkdir $site: $!\n";
+	safemkdir($site);
 }
 
 # now switch to the install.log in the final location
@@ -622,20 +679,46 @@ if ($mustmovelog)
 	$installLog = $newlog;
 }
 
-# before copying anything, lock nmis...
+# before copying anything, kill fpingd and lock nmis (fpingd doesn't even start if locked out)
+execPrint("$site/bin/fpingd.pl kill=true") if (-x "$site/bin/fpingd.pl");
 open(F,">$site/conf/NMIS_IS_LOCKED");
 print F "$0 is operating, started at ".(scalar localtime)."\n";
 close F;
-
-# ...and kill any currently running fpingd
-execPrint("$site/bin/fpingd.pl kill=true");
+open(F, ">/tmp/nmis_install_running");
+print F $$;
+close(F);
 
 printBanner("Copying NMIS files...");
 echolog("Copying source files from $src to $site...\n");
 
-# fixme: this fails benignly but noisyly if there are
-# (convenience) symlinks in the nmis dir, e.g. var or database
-execPrint("cp -r $src/* $site");
+my @candidates;
+find(sub
+		 {
+			 my ($name,$dir,$fn) = ($_, $File::Find::dir, $File::Find::name);
+			 push @candidates, [$dir] if (-d $fn);
+			 push @candidates, [$dir, $name] if (-f $fn); # source contains no symlinks
+		 }, $src);
+
+for (@candidates)
+{
+	my ($sourcedir,$name) = @$_;
+	my $sourcefile = "$sourcedir/$name";
+
+	(my $targetdir = $sourcedir) =~ s!^$src!!;
+	$targetdir = $site."/".$targetdir;
+	safemkdir($targetdir) if (!-d $targetdir);
+
+	# just make the dir
+	if (!defined $name)
+	{
+		safemkdir($targetdir) if (!-d $targetdir);
+	}
+	else
+	{
+		my $targetfile = Cwd::abs_path($targetdir."/".$name);
+		safecopy($sourcefile, $targetfile);
+	}
+}
 
 # catch missing nmis user, regardless of upgrade/new install
 if (!getpwnam("nmis"))
@@ -660,11 +743,16 @@ if (!getpwnam("nmis"))
 
 if ($isnewinstall)
 {
-		printBanner("Installing default config files...");
-		execPrint("cp -a $site/install/* $site/conf/");
-		execPrint("cp -a $site/models-install/* $site/models/");
-		# this test plugin shouldn't be activated automatically
-		unlink("$site/conf/plugins/TestPlugin.pm") if (-f "$site/conf/plugins/TestPlugin.pm");
+	printBanner("Installing default config files...");
+	safemkdir("$site/conf") if (!-d "$site/conf");
+	safemkdir("$site/models") if (!-d "$site/models");
+
+	# -n(oclobber) should not be required as conf site/conf/ and site/models/ should be empty
+	# exexprint returns exit code, ie. 0 if ok
+	die "copying of default config failed!\n" if (execPrint("cp -an $site/install/* $site/conf/"));
+	die "copying of default models failed!\n" if (execPrint("cp -an $site/models-install/* $site/models/"));
+	# this test plugin shouldn't be activated automatically
+	unlink("$site/conf/plugins/TestPlugin.pm") if (-f "$site/conf/plugins/TestPlugin.pm");
 }
 else
 {
@@ -675,81 +763,84 @@ else
 
 	if (@candidates)
 	{
-		if (!-d "$site/conf/plugins") {
-			mkdir("$site/conf/plugins",0755) or die "cannot mkdir $site/conf/plugins: $!\n";
-		}
+		safemkdir("$site/conf/plugins") if (!-d "$site/conf/plugins");
 		printBanner("Updating plugins");
 
 		for my $maybe (@candidates)
 		{
 			next if ($maybe eq "TestPlugin.pm"); # this example plugin shouldn't be auto-activated
-			my $docopy;
-			if (-f "$site/conf/plugins/$maybe")
+			my $docopy = 0;
+			if (-e "$site/conf/plugins/$maybe")
 			{
 				my $havechange = system("diff -q $site/install/plugins/$maybe $site/conf/plugins/$maybe >/dev/null 2>&1") >> 8;
-				if ($havechange and input_yn("OK to replace changed plugin $maybe?"))
-				{
-					$docopy=1;
-				}
+				$docopy = ($havechange and input_yn("OK to replace changed plugin $maybe?"));
 			}
-			else
+			if ($docopy)
 			{
-				$docopy =1;
+				safecopy("$site/install/plugins/$maybe","$site/conf/plugins/$maybe");
 			}
-			execPrint("cp $site/install/plugins/$maybe $site/conf/plugins/$maybe")
-					if ($docopy);
 		}
 	}
 
 	printBanner("Copying new and updated NMIS config files");
-	for my $cff ("BusinessServices.nmis","ServiceStatus.nmis",
-							 "Customers.nmis", "Events.nmis")
+	# copy if missing - note: doesn't cover syntactically broken, though
+	for my $cff ("License.nmis", "Access.nmis", "Config.nmis", "BusinessServices.nmis", "ServiceStatus.nmis",
+							 "Contacts.nmis", "Enterprise.nmis", "Escalations.nmis",
+							 "ifTypes.nmis", "Links.nmis", "Locations.nmis", "Logs.nmis",
+							 "Customers.nmis", "Events.nmis",
+							 "Model-Policy.nmis", "Modules.nmis", "Nodes.nmis", "Outage.nmis", "Portal.nmis",
+							 "PrivMap.nmis", "Services.nmis", "Users.nmis", "users.dat")
 	{
-		if (-f "$site/install/$cff" && !-f "$site/conf/$cff")
+		if (-f "$site/install/$cff" && !-e "$site/conf/$cff")
 		{
-			execPrint("cp -a $site/install/$cff $site/conf/$cff");
+			safecopy("$site/install/$cff","$site/conf/$cff");
 		}
 	}
-	execPrint("cp -fa $site/install/Tables.nmis $site/install/Table-*.nmis $site/conf/");
+
+	printBanner("Removing outdated/moved config files");
+	# script moved to admin
+	execPrint("rm -f $site/conf/update_config_defaults.pl $site/install/update_config_defaults.pl");
 
 	###************************************************************************###
 	printBanner("Updating the config files with any new options...");
 
 	if (input_yn("OK to update the config files?"))
 	{
-		# merge changes for new NMIS Config options. 
+		# merge changes for new NMIS Config options.
 		execPrint("$site/admin/updateconfig.pl $site/install/Config.nmis $site/conf/Config.nmis");
 		execPrint("$site/admin/updateconfig.pl $site/install/Access.nmis $site/conf/Access.nmis");
-		
+
 		# update default config options that have been changed:
-		execPrint("$site/install/update_config_defaults.pl $site/conf/Config.nmis");
-		
+		execPrint("$site/admin/update_config_defaults.pl $site/conf/Config.nmis");
+
 		execPrint("$site/admin/updateconfig.pl $site/install/Modules.nmis $site/conf/Modules.nmis");
-		
-		# patch config changes that affect existing entries, which update_config_defaults 
+
+		execPrint("$site/admin/updateconfig.pl $site/install/Events.nmis $site/conf/Events.nmis");
+
+		# patch config changes that affect existing entries, which update_config_defaults
 		# doesn't handle
 		# which includes enabling uuid
 		execPrint("$site/admin/patch_config.pl -b $site/conf/Config.nmis /system/non_stateful_events='Node Configuration Change, Node Reset, NMIS runtime exceeded' /globals/uuid_add_with_node=true /system/node_summary_field_list,=uuid /system/json_node_fields,=uuid");
 		echolog("\n");
-		
+
 		if (input_yn("OK to remove syslog and JSON logging from default event escalation?"))
 		{
 			execPrint("$site/admin/patch_config.pl -b $site/conf/Escalations.nmis /default_default_default_default__/Level0=''");
 			echolog("\n");
 		}
-		
+
 		if (input_yn("OK to set the FastPing/Ping timeouts to the new default of 5000ms?"))
 		{
 			execPrint("$site/admin/patch_config.pl -b -n $site/conf/Config.nmis /system/fastping_timeout=5000 /system/ping_timeout=5000");
 		}
-		
+
 		# move config/cache files to new locations where necessary
 		if (-f "$site/conf/WindowState.nmis")
 		{
 			printBanner("Moving old WindowState file to new location");
 			execPrint("mv $site/conf/WindowState.nmis $site/var/nmis-windowstate.nmis");
 		}
-		
+
 		# disable the uuid plugin, which this version doesn't need
 		my $obsolete = "$site/conf/plugins/UUIDPlugin.pm";
 		if (-f $obsolete)
@@ -757,13 +848,59 @@ else
 			echolog("Disabling obsolete UUID Plugin");
 			rename($obsolete, "$obsolete.disabled");
 		}
-		
+
+		# handle table files, automatically where possible
+		printBanner("Performing Table Upgrades");
+
+		my @upgradables = `$site/admin/upgrade_tables.pl -o $site/install $site/conf 2>&1`;
+		my $ucheck = $? >> 8;
+		my @problematic = `$site/admin/upgrade_tables.pl -p $site/install $site/conf 2>&1`;
+		logInstall("table upgrade check:\n".join("", @upgradables, @problematic));
+
+		# first mention the problematic files
+		if ($ucheck & 1)
+		{
+			printBanner("Non-upgradeable Table files detected");
+			print "\nThe installer has detected the following table files that require
+manual updating:\n\n" .join("", @problematic) ."\n";
+			&input_ok;
+		}
+		else
+		{
+			echolog("No table files in need of manual updating detected.");
+		}
+
+		if ($ucheck & 2)
+		{
+			printBanner("Auto-upgradeable table files detected");
+
+			print "The installer has detected the following auto-upgradeable table files:\n\n"
+					.join("", @upgradables)."\n";
+
+			if (input_yn("Do you want to upgrade these tables now?"))
+			{
+				execPrint("$site/admin/upgrade_tables.pl -u $site/install $site/conf 2>&1");
+			}
+			else
+			{
+				echolog("Not upgrading tables, as directed.");
+
+				print "\nWe recommend that you use the table upgrade tool to keep your tables up
+to date. You find this tool in $site/admin/upgrade_tables.pl.\n";
+				&input_ok;
+			}
+		}
+		else
+		{
+			echolog("No upgradeable table files detected.");
+		}
+
 		# handle the model files, automatically where possible
 		printBanner("Performing Model Upgrades");
-		
-		my @upgradables = `$site/admin/upgrade_models.pl -o -n Common-database $site/models-install $site/models 2>&1`;
-		my $ucheck = $? >> 8;
-		my @problematic = `$site/admin/upgrade_models.pl -p -n Common-database $site/models-install $site/models 2>&1`;
+
+		@upgradables = `$site/admin/upgrade_models.pl -o -n Common-database $site/models-install $site/models 2>&1`;
+		$ucheck = $? >> 8;
+		@problematic = `$site/admin/upgrade_models.pl -p -n Common-database $site/models-install $site/models 2>&1`;
 		logInstall("model upgrade check:\n".join("", @upgradables, @problematic));
 
 		# first mention the problematic models
@@ -771,23 +908,22 @@ else
 		{
 			printBanner("Non-upgradeable model files detected");
 			print "\nThe installer has detected the following model files that require
-manual updating:\n\n" .join("", @problematic) ."\nYou should check the NMIS Wiki for instructions on manual 
-model upgrades: https://community.opmantek.com/x/-wd4\n
-PLease hit <Enter> to continue:\n";
-			my $x = <STDIN>;
+manual updating:\n\n" .join("", @problematic) ."\nYou should check the NMIS Wiki for instructions on manual
+model upgrades: https://community.opmantek.com/x/-wd4\n";
+			&input_ok;
 		}
 		else
 		{
 			echolog("No model files in need of manual updating detected.");
 		}
-		
+
 		if ($ucheck & 2)
 		{
 			printBanner("Auto-upgradeable model files detected");
-			
-			print "The installer has detected that the following auto-upgradeable model files:\n\n"
+
+			print "The installer has detected the following auto-upgradeable model files:\n\n"
 					.join("", @upgradables)."\n";
-			
+
 			if (input_yn("Do you want to perform this model upgrade now?"))
 			{
 				execPrint("$site/admin/upgrade_models.pl -u -n Common-database $site/models-install $site/models 2>&1");
@@ -795,35 +931,60 @@ PLease hit <Enter> to continue:\n";
 			else
 			{
 				echolog("Not upgrading models, as directed.");
-				
-				print "\nWe recommend that you use the model upgrade tool to keep your models up 
+
+				print "\nWe recommend that you use the model upgrade tool to keep your models up
 to date. You find this tool in $site/admin/upgrade_models.pl
 and the NMIS Wiki has extra information about it at
-https://community.opmantek.com/x/-wd4
-
-Please hit <Enter> to continue:\n";
-				my $x = <STDIN>;
+https://community.opmantek.com/x/-wd4\n";
+				&input_ok;
 			}
-		} 
+		}
 		else
 		{
 			echolog("No upgradeable model files detected.");
 		}
-		
+
+		printBanner("Checking JSON Migration");
+
+		my $havelegacy = execLog("$site/admin/convert_nmis_db.pl simulate=true 2>&1");
+		if ($havelegacy)
+		{
+			print "The installer has detected that your NMIS installation is still using
+legacy '.nmis' database files. We recommend that you use the
+db conversion tool to migrate your NMIS to JSON.\n\n";
+
+			if (input_yn("Do you want to perform the JSON migration now?"))
+			{
+				execPrint("$site/admin/convert_nmis_db.pl simulate=false info=1");
+			}
+			else
+			{
+				echolog("Not upgrading to JSON files, as directed.");
+
+				print "\nWe recommend that you use the db conversion tool to
+switch to JSON. You can find this tool in $site/admin/convert_nmis_db.pl.\n";
+				&input_ok;
+			}
+		}
+		else
+		{
+			echolog("JSON migration not necessary.");
+		}
+
 		printBanner("Performing RRD Tuning");
 		print "Please be patient, this step can take a while...\n";
-		
+
 		# these four lots of output, so capture and log w/o display
-		
+
 		# that plugin normally does its own confirmation prompting, which cannot work with execPrint
 		execLog("$site/admin/install_stats_update.pl nike=true");
-		
+
 		# Updating the mib2ip RRD Type
 		execLog("$site/admin/rrd_tune_mib2ip.pl run=true change=true");
-		
+
 		# Updating the TopChanges RRD Type
 		execLog("$site/admin/rrd_tune_topo.pl run=true change=true");
-		
+
 		# Updating the TopChanges RRD Type
 		execLog("$site/admin/rrd_tune_responsetime.pl run=true change=true");
 
@@ -834,29 +995,89 @@ Please hit <Enter> to continue:\n";
 	else
 	{
 		echolog("Continuing without configuration updates as directed.
-Please note that you will likely have to perform various configuration updates manually 
+Please note that you will likely have to perform various configuration updates manually
 to ensure NMIS performs correctly.");
-		print "\n\nPlease hit <Enter> to continue: ";
-		my $x = <STDIN>;
+		&input_ok;
 	}
+}
+
+# check that the wmic we've shipped actually works on this platform
+my $version = `$site/bin/wmic -V 2>&1`;
+my $exit = $?;
+if ($exit)
+{
+	printBanner("Precompiled WMIC failed to run!");
+	logInstall("Output of wmic test was: $version");
+
+	print qq|NMIS ships with a precompiled WMI client ($site/bin/wmic),
+but for some reason or another the program failed to execute on
+your system. This may be caused by shared library incompatibilities,
+and the install.log may contain further clues as to what went wrong.
+
+If you want NMIS to collect data from WMI-based nodes you will
+have to download wmic from http://dl-nmis.opmantek.com/wmic-omk.tgz,
+then compile and install it by hand. The Opmantek Wiki at
+https://community.opmantek.com/x/VQJFAQ has more information
+on this procedure.
+
+If you do not plan to use WMI-based models you can safely ignore
+this issue.\n\n|;
+	&input_ok;
+}
+else
+{
+	printBanner("Checked precompiled WMIC");
+	echolog("Precompiled WMIC ran ok, reported version: $version");
 }
 
 ###************************************************************************###
 printBanner("Cache some fonts...");
 execPrint("fc-cache -f -v");
 
+# fix the 8.5.12G common-database gotcha first
+if (open(F, "$site/models/Common-database.nmis"))
+{
+	my @current = <F>;
+	close F;
+	if (2 == grep(/'ospfNbr'/, @current))
+	{
+		echolog("Fixing duplicate Common-database entries for ospfNbr");
+		# don't want any quoting issues which execPrint or execLog would introduce
+		system("$site/admin/patch_config.pl","-b",
+					 "$site/models/Common-database.nmis",
+					 '/database/type/ospfNbr=/nodes/$node/health/ospfNbr-$index.rrd');
+	}
+}
+
 # check if the common-databases differ, and if so offer to run migrate_rrd_locations.pl
 if (!$isnewinstall)
 {
-	echolog("Checking Common-database files for updates");
-	logInstall("running $site/admin/diffconfigs.pl -q $site/models/Common-database.nmis $site/models-install/Common-database.nmis 2>/dev/null | grep -qF /database/type");
-	my $res = system("$site/admin/diffconfigs.pl -q $site/models/Common-database.nmis $site/models-install/Common-database.nmis 2>/dev/null | grep -qF /database/type");
-	if ($res >> 8 == 0)						# relevant diffs were found
+	printBanner("Checking Common-database file for updates");
+
+	# two cases: something not found -> migration tool to update, missing stuff, FIRST.
+	# then if there are any issues with actual actual differences, full migration tool run
+	my $diffs = `$site/admin/diffconfigs.pl $site/models/Common-database.nmis $site/models-install/Common-database.nmis 2>/dev/null`;
+	my $res = $? >> 8;
+
+	if (!$res)
 	{
-		printBanner("RRD Database Migration");
-		echolog("The installer has detected differences between your current Common-database
-and the shipped one. These changes can be merged using the rrd migration
-script that comes with NMIS.
+		echolog("No differences between current and new Common-database.nmis found.");
+		print "\n\n";
+	}
+	elsif ($diffs =~ m!^-\s+<NOT PRESENT!m)
+	{
+		# perform a missingonly update
+		echolog("Found new entries, adding them.");
+		execPrint("$site/admin/migrate_rrd_locations.pl newlayout=$site/models-install/Common-database.nmis missingonly=true leavelocked=true");
+		print "\n\n";
+	}
+
+	if ($diffs =~ m!^-\s+/nodes!m) # ie. present but different
+	{
+		printBanner("RRD Database Migration Required");
+		echolog("The installer has detected structural differences between your current
+Common-database and the shipped one. These changes can be merged using
+the rrd migration script that comes with NMIS.
 
 If you choose Y below, the installer will use admin/migrate_rrd_locations.pl
 to move all existing RRD files into the appropriate new locations and merge
@@ -875,19 +1096,18 @@ in your current Common-database configuration file.\n\n");
 The RRD migration script could not complete its test run successfully.
 The RRD migration will therefore NOT be performed.
 
-Please check the installation log and diagnostic output for details.\nHit <Enter> to continue:\n");
-				my $x = <STDIN>;
+Please check the installation log and diagnostic output for details.\n");
+				&input_ok;
 			}
 			else
 			{
 				echolog("Performing the actual RRD migration operation...\n");
-				my $error = execPrint("$site/admin/migrate_rrd_locations.pl newlayout=$site/models-install/Common-database.nmis");
-
+				my $error = execPrint("$site/admin/migrate_rrd_locations.pl newlayout=$site/models-install/Common-database.nmis leavelocked=true");
 				if ($error)
 				{
 					echolog("Error: RRD migration failed! Please use the rollback script
-listed above to revert to the original status!\nHit <Enter> to continue:\n");
-					my $x = <STDIN>;
+listed above to revert to the original status!\n");
+					&input_ok;
 				}
 				else
 				{
@@ -904,19 +1124,18 @@ simulation mode where it only shows what it WOULD do without making any
 changes.
 
 It is highly recommended that you perform the RRD migration.");
-			print "Please hit <Enter> to continue:\n";
-			my $x = <STDIN>;
+			&input_ok;
 		}
-	}
-	else
-	{
-		echolog("No relevant differences between current and new Common-database.nmis,
-no RRD migration required.");
 	}
 }
 
+echolog("Ensuring correct file permissions...");
+execPrint("$site/admin/fixperms.pl");
+
 # all files are there; let nmis run
 unlink("$site/conf/NMIS_IS_LOCKED");
+unlink("$site/var/nmis_system/selftest.json");
+unlink("/tmp/nmis_install_running");
 
 # daemon restarting should only be done after nmis is unlocked
 printBanner("Restart the fping daemon...");
@@ -956,10 +1175,8 @@ web server manually.
 Please use the output of 'nmis.pl type=apache' and check the
 NMIS Installation guide at
 https://community.opmantek.com/x/Dgh4
-for further info.
-
-Please hit <Enter> to continue:\n";
-		my $x = <STDIN>;
+for further info.\n";
+		&input_ok;
 	}
 	else
 	{
@@ -977,9 +1194,10 @@ Please hit <Enter> to continue:\n";
 		{
 			execPrint("mv /tmp/$apacheconf $finaltarget");
 			execPrint("ln -s $finaltarget /etc/apache2/sites-enabled/")
-					if (-d "/etc/apache2/sites-enabled");
+					if (-d "/etc/apache2/sites-enabled" && !-l "/etc/apache2/sites-enabled/$apacheconf");
 
-			if ($istwofour)
+			# meh. rh/centos doesn't have a2enmod
+			if ($istwofour && $osflavour ne "redhat")
 			{
 				execPrint("a2enmod cgi");
 			}
@@ -1004,10 +1222,8 @@ web server manually.
 Please use the output of 'nmis.pl type=apache' (or type=apache24) and
 check the NMIS Installation guide at
 https://community.opmantek.com/x/Dgh4
-for further info.
-
-Please hit <Enter> to continue:\n";
-			my $x = <STDIN>;
+for further info.\n";
+			&input_ok;
 		}
 	}
 }
@@ -1027,7 +1243,7 @@ if ($lrver =~ /^logrotate (\d+\.\d+\.\d+)/m)
 	{
 		if (input_yn("OK to install updated log rotation configuration file\n\t$lrfile in /etc/logrotate.d?"))
 		{
-			execPrint("cp $lrfile $lrtarget");
+			safecopy($lrfile,$lrtarget);
 		}
 		else
 		{
@@ -1045,14 +1261,13 @@ else
 The installer could not determine the version of your \"logrotate\" tool,
 and you will have to configure log rotation manually. There are two default
 log rotation configuration files in $site/install
-that you should use as the basis for your setup.\n\nPlease hit <Enter> to continue:\n";
-	my $x = <STDIN>;
+that you should use as the basis for your setup.\n";
+	&input_ok;
 }
 
 printBanner("NMIS Cron Setup");
 
-(-d "$site/install/cron.d") or mkdir("$site/install/cron.d", 0755) 
-		or die "cannot mkdir $site/install/cron.d/: $!\n";
+safemkdir("$site/install/cron.d") if (!-d "$site/install/cron.d");
 my $systemcronfile = "/etc/cron.d/nmis";
 my $newcronfile = "$site/install/cron.d/nmis";
 my $showreminder = 1;
@@ -1083,20 +1298,23 @@ else
 	}
 	else
 	{
-		
+
 		print "NMIS relies on Cron to schedule its periodic execution,
 and provides an example/default Cron schedule.
 
 The installer can install this default schedule in /etc/cron.d/nmis,
 which immediately activates it.
 
-If you already have NMIS entries in your root crontab,
+(If you already have old NMIS entries in your root user's crontab,
 then the installer will comment out all NMIS entries in
-that crontab.\n\n";
+that crontab.)
+
+From 8.6.0 onwards the default Cron schedule uses the nmis_maxthreads
+configuration setting (which defaults to 10 parallel processes).\n\n";
 
 		if (input_yn("Do you want the default NMIS Cron schedule\nto be installed in $systemcronfile?"))
 		{
-			my $res = File::Copy::copy($newcronfile, $systemcronfile);
+			my $res = File::Copy::cp($newcronfile, $systemcronfile);
 			if (!$res)
 			{
 				echolog("Error: writing to $systemcronfile failed: $!");
@@ -1104,9 +1322,9 @@ that crontab.\n\n";
 			else
 			{
 				$showreminder = 0;
-				print "\nA new default cron was created in /etc/cron.d/nmis, 
+				print "\nA new default cron was created in /etc/cron.d/nmis,
 but feel free to adjust it.\n\n";
-				
+
 				my $oldcronfixedup;
 				# now clean up the old per-user cron, if there is one!
 				echolog("Cleaning up old per-user crontab");
@@ -1114,7 +1332,7 @@ but feel free to adjust it.\n\n";
 				if (0 == $res>>8)
 				{
 					echolog("Old crontab was saved in $site/conf/crontab.root");
-					
+
 					open (F, "$site/conf/crontab.root") or die "cannot read crontab.root: $!\n";
 					my @crondata = <F>;
 					close F;
@@ -1129,15 +1347,14 @@ but feel free to adjust it.\n\n";
 					echolog("Cleaned-up crontab was installed.");
 					$oldcronfixedup = 1;
 				}
-			
+
 				if ($oldcronfixedup)
 				{
 					print "Any NMIS entries in root's existing crontab were commented out,
 and a backup of the crontab was saved in $site/conf/crontab.root.\n\n";
 				}
-			
-				print "Please hit <Enter> to continue:\n";
-				my $x = <STDIN>;
+
+				&input_ok;
 				logInstall("New system crontab was installed in /etc/cron.d/nmis");
 			}
 		}
@@ -1147,11 +1364,11 @@ and a backup of the crontab was saved in $site/conf/crontab.root.\n\n";
 if ($showreminder)
 {
 	print "\n\nNMIS will require some scheduling setup to work correctly.\n
-An example default Cron schedule is available 
-in $newcronfile, and you can use 
+An example default Cron schedule is available
+in $newcronfile, and you can use
 \"$site/bin/nmis.pl type=crontab system=true >/tmp/somefile\"
-to regenerate that default.\nPlease hit <Enter> to continue:\n";
-			my $x = <STDIN>;
+to regenerate that default.\n";
+	&input_ok;
 }
 
 ###************************************************************************###
@@ -1162,18 +1379,17 @@ printBanner("NMIS State ".($isnewinstall? "Initialisation":"Update"));
 if ( input_yn("NMIS Update: This may take up to 30 seconds\n(or a very long time with MANY nodes)...\n
 Ok to run an NMIS type=update action?"))
 {
-
+	print "Update running, please be patient...\n";
+	execPrint("$site/bin/nmis.pl type=update force=true mthread=true");
 }
 else
 {
 	print "Ok, continuing without the update run as directed.\n\n
 It's highly recommended to run nmis.pl type=update once initially
-and after every NMIS upgrade - you should do this manually.\n
-Please hit <Enter> to continue: ";
+and after every NMIS upgrade - you should do this manually.\n";
+	&input_ok;
 
 	logInstall("continuing without the update run.\nIt's highly recommended to run nmis.pl type=update once initially and after every NMIS upgrade - you should do this manually.");
-
-	my $x = <STDIN>;
 }
 
 if (-d "$site.unwanted" && input_yn("OK to remove temporary/backup files?"))
@@ -1237,7 +1453,8 @@ sub parsefile {
 
 
 # returns (1) if no critical modules missing, (0,critical modules) otherwise
-sub checkCpan {
+sub check_installed_modules
+{
 	printBanner("Checking for required Perl modules");
 	print <<EOF;
 This will check for installed Perl modules, first by parsing the
@@ -1259,16 +1476,44 @@ EOF
 
 	find(\&getModules, "$src");
 
-	# now determine if installed or not.
-	foreach my $mod ( keys %$nmisModules ) {
+	# add two semi-optional modules, third (digest::md5) is in core
+	$nmisModules->{"Crypt::DES"} = { file => "MODULE NOT FOUND", type => "use", by => "lib/snmp.pm" };
+	$nmisModules->{"Digest::HMAC"} = { file => "MODULE NOT FOUND", type => "use", by => "lib/snmp.pm" };
 
+	# these are critical for getting mojolicious installed, as centos 6 perl has a much too old perl
+	# these modules are in core since 5.19 or thereabouts
+
+	$nmisModules->{"IO::Socket::IP"} = { file => "MODULE NOT FOUND", type  => "use",
+																			 by => "lib/Auth.pm", priority => 99 };
+	# io socket ip needs at least this version of socket...
+	$nmisModules->{"Socket"} = { file => "MODULE NOT FOUND", type  => "use",
+															 by => "lib/Auth.pm", minversion => "1.97",
+															 priority => 99 };
+	# and socket needs at least this version of extutils constant to build
+	$nmisModules->{"ExtUtils::Constant"} = { file => "MODULE NOT FOUND", type  => "use",
+																					 by => "lib/Auth.pm", minversion => "0.23",
+																					 priority => 100 };
+	# and mojolicious needs all these
+	$nmisModules->{"JSON::PP"} = { file => "MODULE NOT FOUND", type  => "use",
+																 by => "lib/Auth.pm", priority => 99 };
+	$nmisModules->{"Time::Local"} = { file => "MODULE NOT FOUND", type  => "use",
+																		by => "lib/Auth.pm", minversion => "1.2", priority => 99 };
+	# and time::local needs at least this version of test::More
+	$nmisModules->{"Test::More"} = { file => "MODULE NOT FOUND", type  => "use",
+																	 by => "lib/Auth.pm", minversion => "0.96", priority => 100 };
+
+
+	# now determine if installed or not.
+	# sort by the required cpan sequencing (no priority is last)
+	foreach my $mod (keys %$nmisModules)
+	{
 		my $mFile = $mod . '.pm';
 		# check modules that are multivalued, such as 'xx::yyy'	and replace :: with directory '/'
 		$mFile =~ s/::/\//g;
 		# test for local include first
 		if ( -e "$libPath/$mFile" ) {
 			$nmisModules->{$mod}{file} = "$libPath/$mFile";
-			$nmisModules->{$mod}{version} = &moduleVersion("$libPath/$mFile");
+			$nmisModules->{$mod}{version} = &moduleVersion("$libPath/$mFile", $mod);
 		}
 		else {
 			# Now look in @INC for module path and name
@@ -1276,7 +1521,7 @@ EOF
 			foreach my $path( @INC ) {
 				if ( -e "$path/$mFile" )
 				{
-					my $thisversion = moduleVersion("$path/$mFile");
+					my $thisversion = moduleVersion("$path/$mFile", $mod);
 					if (!$nmisModules->{$mod}{version}
 							or !$thisversion
 							or version->parse($thisversion) >= version->parse($nmisModules->{$mod}{version}))
@@ -1295,33 +1540,42 @@ EOF
 
 
 # get the module version
-# this is non-optimal, but gets the task done with no includes or 'use modulexxx'
-# whhich would kill this script :-)
-sub moduleVersion {
-	my $mFile = shift;
+# args: actual file, and module name
+# this is non-optimal, and fails on a few modules (e.g. Encode)
+sub moduleVersion
+{
+	my ($mFile, $modname) = @_;
 	open FH,"<$mFile" or return 'FileNotFound';
-	while (<FH>) 
+	while (<FH>)
 	{
 		if (/^\s*((our|my)\s+\$|\$(\w+::)*)VERSION\s*=\s*['"]?\s*[vV]?([0-9\.]+)\s*['"]?s*;/)
 		{
+			close FH;
 			return $4;
 		}
 	}
 	close FH;
-	return '';
+	# present but didn't match? ask the module then...
+	eval { no warnings; require $mFile; };
+	return undef if ($@);
+
+	my $ver = eval { $modname->VERSION };
+	return $ver;
 }
 
 # returns (1) if no critical modules missing, (0,critical) otherwise
+# note that they're returned in order of cpan sequencing priority
 sub listModules
 {
   my (@missing, @critmissing);
   my %noncritical = ("Net::LDAP"=>1, "Net::LDAPS"=>1, "IO::Socket::SSL"=>1,
 										 "Crypt::UnixCrypt"=>1, "Authen::TacacsPlus"=>1, "Authen::Simple::RADIUS"=>1,
-										 "SNMP_util"=>1, "SNMP_Session"=>1, "SOAP::Lite" => 1, "UI::Dialog" => 1);
-
+										 "SNMP_util"=>1, "SNMP_Session"=>1, "SOAP::Lite" => 1, "UI::Dialog" => 1, );
 
   logInstall("Module status follows:\nName - Path - Current Version - Minimum Version\n");
-	foreach my $k (sort {$nmisModules->{$a}{file} cmp $nmisModules->{$b}{file} } keys %$nmisModules)
+	# sort by install prio, or file
+	foreach my $k ( sort { $nmisModules->{$b}->{priority} <=> $nmisModules->{$a}->{priority}
+												 or $nmisModules->{$a}{file} cmp $nmisModules->{$b}{file} } keys %$nmisModules)
 	{
     logInstall(join("\t", $k, $nmisModules->{$k}->{file},
 										$nmisModules->{$k}->{version}||"N/A", $nmisModules->{$k}->{minversion}||"N/A"));
@@ -1346,15 +1600,17 @@ NMIS AAA system.
 
 The modules SNMP_util and SNMP_Session are also optional (needed only for
 the ipsla subsystem) and can be installed either with
-'yum install perl-SNMP_Session' or from the provided tar file in
-install/SNMP_Session-1.12.tar.gz.\n\n|;
+'yum install perl-SNMP_Session' or 'apt-get install libsnmp-session-perl'.
+
+The modules Digest::HMAC and Crypt::DES are required if any of your
+devices use SNMP Version 3.\n\n|;
 		}
 
 		if (@critmissing)
 		{
-			printBanner("Some Critical Perl Modules are missing (or too old)!");
-			print qq|The following essential Perl modules are missing or too old and need
-to be installed (or upgraded) before NMIS will work correctly:\n\n| . join(" ", @critmissing)."\n\n";
+			printBanner("Some Important Perl Modules are missing (or too old)!");
+			print qq|The following Perl modules are missing or too old and need
+to be installed (or upgraded) before NMIS will work fully:\n\n| . join(" ", @critmissing)."\n\n";
 		}
 
 		print qq|These modules can be installed with CPAN:
@@ -1376,8 +1632,8 @@ sub input_yn
 {
 	my ($query) = @_;
 
-	print "$query";
-	if ($options{y})
+	print $query;
+	if ($noninteractive)
 	{
 		print " (auto-default YES)\n\n";
 		return 1;
@@ -1393,6 +1649,13 @@ sub input_yn
 	}
 }
 
+# prints prompt, waits for confirmation
+sub input_ok
+{
+	print "\nHit <Enter> to continue:\n";
+	my $x = <STDIN> if (!$noninteractive);
+}
+
 # question, default answer, whether we want confirmation or not
 # returns string in question
 sub input_str
@@ -1400,7 +1663,7 @@ sub input_str
 	my ($query, $default, $wantconfirmation) = @_;
 
 	print "$query [default: $default]: ";
-	if ($options{y})
+	if ($noninteractive)
 	{
 		print " (auto-default)\n\n";
 		return $default;
@@ -1489,8 +1752,6 @@ sub execLog {
 	logInstall("###". ($res? " Exit Code: $res ":''). "+++\n\n");
 	return $res;
 }
-		
-
 
 # prints args to stdout, logs to install log.
 # args should not have a trailing newline.
@@ -1509,33 +1770,22 @@ sub logInstall {
 	}
 }
 
-sub printHelp {
-	print qq/
-NMIS Install Script
-
-NMIS Copyright (C) Opmantek Limited (www.opmantek.com)
-This program comes with ABSOLUTELY NO WARRANTY;
-
-usage: $0 [site=$site] [listdeps=(true|false)]
-
-Options:
-  listdeps Only show (missing) dependencies, do not install NMIS
-  site	Target site for installation, default is $site
-
-eg: $0 site=$site cpan=true
-
-/;
-}
-
-sub getArguements {
+sub getArguements
+{
 	my @argue = @_;
-	my (%nvp, $name, $value, $line, $i);
-	for ($i=0; $i <= $#argue; ++$i) {
-	        if ($argue[$i] =~ /.+=/) {
-	                ($name,$value) = split("=",$argue[$i]);
-	                $nvp{$name} = $value;
-	        }
-	        else { print "Invalid command argument: $argue[$i]\n"; }
+	my %nvp;
+
+	for my $maybe (@argue)
+	{
+		if ($maybe =~ /^.+=/)
+		{
+			my ($name,$value) = split("=",$maybe,2);
+			$nvp{$name} = $value;
+		}
+		else
+		{
+			print "Invalid command argument: $maybe\n";
+		}
 	}
 	return %nvp;
 }
@@ -1558,13 +1808,92 @@ sub enable_custom_repo
 			execPrint("yum -y install 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-$majorlevel.noarch.rpm'");
 		}
 	}
-	elsif ($reponame =~ /^(repo|rpm)forge$/i)
+	elsif ($reponame eq "gf")
 	{
-		echolog("\nEnabling RepoForge repository\n");
-		execPrint("yum -y install 'http://pkgs.repoforge.org/rpmforge-release/rpmforge-release-0.5.3-1.el$majorlevel.rf.x86_64.rpm'");
+		echolog("\nEnabling Ghettoforge repository\n");
+		execPrint("yum -y install 'http://mirror.symnds.com/distributions/gf/el/$majorlevel/gf/x86_64/gf-release-$majorlevel-10.gf.el$majorlevel.noarch.rpm'");
 	}
 	else
 	{
-		die "Cannot enable unknown custom repository \"reponame\"!\n";
+		die "Cannot enable unknown custom repository \"$reponame\"!\n";
 	}
+}
+
+# copy file from a to b, but only if the target is not a symlink
+# if symlink, warn the user about it and request confirmation (default action: leave unchanged)
+# args: source, destination, options
+# returns: 1 if ok, dies on errors
+sub safecopy
+{
+	my ($source, $destination, %options) = @_;
+	die "safecopy: invalid args, $source is not a file!\n" if (!-f $source);
+	die "safecopy: invalid args, $destination missing or a dir!\n" if (!$destination or -d $destination);
+
+	if (-l $destination )
+	{
+		my $actualtarget = readlink($destination);
+		echolog("Warning: $destination is a symbolic link pointing to $actualtarget!");
+		print "\n";
+
+		# default should be the safe behaviour, i.e. don't clobber the target
+		if (input_yn("OK to leave the symbolic link $destination unchanged?"))
+		{
+			echolog("NOT overwriting $destination.\nThis may require manual adjustment post-install.");
+			return 1;
+		}
+		else
+		{
+			echolog("Overwriting $destination (= $actualtarget) as requested.");
+		}
+	}
+	# must work around 'text file busy' on executables (right now just wmic)
+	if (-e $destination)
+	{
+		logInstall("replacing $destination with $source");
+		unlink($destination) or die("failed to remove $destination: $!\n");
+	}
+	else
+	{
+		logInstall("copying $source to $destination");
+	}
+	# unfortunately, file::copy in centos/rh6 is too old for useful behaviour wrt. permissions,
+	if (version->parse($File::Copy::VERSION) < version->parse("2.15"))
+	{
+		die "Failed to copy $source to $destination: $!\n"
+				if (system("cp","-a", $source, $destination));
+	}
+	else
+	{
+		File::Copy::cp($source,$destination) or die "Failed to copy $source to $destination: $!\n";
+	}
+	return 1;
+}
+
+# creates a whole directory hierarchy like mkdir -p
+# args: dir name
+# returns: 1 if ok, dies on failure
+sub safemkdir
+{
+	my ($dirname) = @_;
+	die "safemkdir: invalid args, dirname missing!\n" if (!$dirname);
+
+	return 1 if (-d $dirname);
+	logInstall("making directory $dirname");
+	# ensure we don't create unworkable dirs and files, if the parent shell
+	# has a super-restrictive umask: file::path perms are subject to umask!
+	my $prevmask = umask(0022);
+	my $error;
+	File::Path::make_path($dirname, { error => \$error,
+																		mode =>  0755 } ); # umask is applied to this :-/
+	if (ref($error) eq "ARRAY" and @$error)
+	{
+		my @errs;
+		for my $issue (@$error)
+		{
+			push @errs, join(": ", each %$issue);
+		}
+		die "Could not create directory $dirname: ".join(", ",@errs)."\n";
+	}
+	umask($prevmask);
+	return 1;
 }

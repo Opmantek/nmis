@@ -58,7 +58,7 @@
         'element' => 'vmwVmDisplayName',
         'event' => 'Virtual Machine not Powered On',
         'level' => 'Warning',
-        'test' => 'CVAR1=vmwVmState;"$CVAR1" ne "powered on"',
+        'test' => 'CVAR1=vmwVmState;"$CVAR1" ne "powered on" and "$CVAR1" ne "noSuchInstance"',
         'type' => 'test',
         'unit' => 'state',
         'value' => 'CVAR1=vmwVmState;return "$CVAR1"'
@@ -250,7 +250,7 @@
             'option' => 'gauge,0:100'
           },
           'ifDescr' => {
-            'oid' => 'ifDescr'
+            'oid' => 'ifName'
           },
           'ifInOctets' => {
             'oid' => 'ifInOctets',
@@ -290,15 +290,21 @@
               '3' => 'testing',
               '7' => 'lowerLayerDown',
               '2' => 'down',
-              '5' => 'dormant'
+              '5' => 'dormant',
             },
             'oid' => 'ifOperStatus',
-            'title' => 'Oper Status'
+            'title' => 'Oper Status',
           },
-          'ifDescr' => {
-            'oid' => 'ifDescr',
-            'title' => 'Name'
+					'ifDescr' => {
+						'oid' => 'ifName',
+            'title' => 'Name (ifName)',
+					},
+					
+					'Hardware' => {
+						'oid' => 'ifDescr',
+            'title' => 'Hardware (ifDescr)',
           },
+
 					'ifPhysAddress' => {
             'oid' => 'ifPhysAddress',
             'title' => 'Physical Address',
@@ -323,7 +329,7 @@
           },
           'Description' => {
             'oid' => 'ifAlias',
-            'title' => 'Description'
+            'title' => 'Description (ifAlias)'
           },
           'ifLastChange' => {
             'oid' => 'ifLastChange',
@@ -331,7 +337,7 @@
           },
           'ifType' => {
             'oid' => 'ifType',
-            'title' => 'Type'
+            'title' => 'Type (ifType)'
           }
         }
       },

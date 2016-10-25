@@ -62,6 +62,15 @@
       'asset' => {
         'common-model' => 'Cisco-asset'
       },
+      'cbqos' => {
+        'common-model' => 'Cisco-cbqos'
+      },
+      'macTable' => {
+        'common-model' => 'Cisco-macTable'
+      },
+      'mpls' => {
+        'common-model' => 'mpls'
+      },
       'neighbor' => {
         'common-model' => 'Cisco-neighbor'
       },
@@ -70,6 +79,12 @@
       },
       'status' => {
         'common-model' => 'Cisco-status'
+      },
+      'vlan' => {
+        'common-model' => 'Cisco-vlan'
+      },
+      'lldp' => {
+        'common-model' => 'lldp'
       },
     }
   },
@@ -94,9 +109,14 @@
             'oid' => 'sysObjectID'
           },
           'sysUpTime' => {
-            'oid' => 'sysUpTime',
+            'calculate' => '$r * 100',
+            'oid' => 'snmpEngineTime',
             'title' => 'Uptime'
           },
+          #'sysUpTime' => {
+          #  'oid' => 'sysUpTime',
+          #  'title' => 'Uptime'
+          #},
           'ifNumber' => {
             'oid' => 'ifNumber',
             'title' => 'Interfaces'
@@ -159,7 +179,45 @@
             'oid' => '1.3.6.1.4.1.9.9.25.1.1.1.2.5',
             'snmpObjectName' => 'ciscoVersionString',
             'title' => 'Software Version'
-          }
+          },
+          'rttMonApplVersion' => {
+            'oid' => '1.3.6.1.4.1.9.9.42.1.1.1.0',
+            'snmpObjectName' => 'rttMonApplVersion',
+            'replace' => {
+              'noSuchObject' => 'N/A'
+            },
+            'title' => 'IPSLA Version'
+          },
+          'rttMonApplResponder' => {
+            'oid' => '1.3.6.1.4.1.9.9.42.1.1.13.0',
+            'snmpObjectName' => 'rttMonApplResponder',
+            'replace' => {
+              '1' => 'enabled',
+              '2' => 'disabled',
+              'noSuchObject' => 'N/A'
+            },
+            'title' => 'IPSLA Responder'
+          },
+          'mplsLdpLsrId' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.1.1',
+            'snmpObjectName' => 'mplsLdpLsrId',
+            'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
+            'title' => 'MPLS LSR'
+          },
+          'mplsLdpLsrIdCisco' => {
+            'oid' => '1.3.6.1.4.1.9.10.65.1.1.1',
+            'snmpObjectName' => 'mplsLdpLsrId',
+            'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
+            'title' => 'MPLS LSR Cisco'
+          },
+          'TimeSinceTopologyChange' => {
+            'oid' => 'dot1dStpTimeSinceTopologyChange',
+            'Title' => 'Time Since STP Topology Change',
+            'replace' => {
+              'noSuchObject' => 'N/A',
+              'noSuchInstance' => 'N/A',
+            }
+          },
         }
       }
     },
@@ -280,6 +338,7 @@
   'interface' => {
     'sys' => {
       'standard' => {
+      	'headers' => 'ifIndex,ifDescr,Description,ifAdminStatus,ifOperStatus,ifType,ifPhysAddress,ifSpeed,ifHighSpeed,ifLastChange,collect,nocollect',
         'snmp' => {
           'ifOperStatus' => {
             'replace' => {
@@ -560,79 +619,6 @@
     }
   },
   'systemHealth' => {
-    'sections' => 'addressTable,cdp,macTable,vtpVlan,fanStatus,psuStatus,tempStatus,entityMib,ciscoAsset',
-    'sys' => {
-      'macTable' => {
-        'headers' => 'ifDescr,dot1dTpFdbAddress,vlan,dot1dTpFdbPort,dot1dTpFdbStatus,updateDate',
-        'indexed' => 'dot1qTpFdbPort',
-        'snmp' => {
-          'ifDescr' => {
-            'title' => 'ifDescr'
-          },
-          'dot1dTpFdbAddress' => {
-            'title' => 'Address'
-          },
-          'vlan' => {
-            'title' => 'VLAN'
-          },
-          'dot1dTpFdbPort' => {
-            'title' => 'Port'
-          },
-          'dot1dTpFdbStatus' => {
-            'title' => 'Status'
-          },
-        }
-      },
-      'vtpVlan' => {
-        'headers' => 'vtpVlanName,vtpVlanState,vtpVlanType,vtpVlanMtu,vtpVlanIfIndex,ifDescr',
-        'index_regex' => '\\.(\\d+\.\\d+)$',
-        'indexed' => 'vtpVlanState',
-        'snmp' => {
-          'vtpVlanName' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.4',
-            'title' => 'VLAN Name'
-          },
-          'vtpVlanIndex' => {
-            'title' => 'VLAN'
-          },
-          'vtpVlanState' => {
-            'oid' => 'vtpVlanState',
-            'replace' => {
-              '1' => 'operational',
-              '2' => 'suspended',
-              '3' => 'mtuTooBigForDevice',
-              '4' => 'mtuTooBigForTrunk',
-            },
-            'title' => 'VLAN State'
-          },
-          'vtpVlanType' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.3',
-            'replace' => {
-              '1' => 'ethernet',
-              '2' => 'fddi',
-              '3' => 'tokenRing',
-              '4' => 'fddiNet',
-              '5' => 'trNet',
-              '6' => 'deprecated',
-            },
-            'title' => 'VLAN Type'
-          },
-          'vtpVlanMtu' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.5',
-            'title' => 'VLAN MTU'
-          },
-          'vtpVlanIfIndex' => {
-            'oid' => '1.3.6.1.4.1.9.9.46.1.3.1.1.18',
-            'replace' => {
-              '0' => 'N/A',
-            },
-            'title' => 'VLAN ifIndex'
-          },
-          'ifDescr' => {
-            'title' => 'ifDescr'
-          },
-        }
-      },
-    },
+    'sections' => 'Cisco_CBQoS,addressTable,cdp,lldp,lldpLocal,macTable,vtpVlan,fanStatus,psuStatus,tempStatus,entityMib,ciscoAsset,bgpPeer,ospfNbr,mplsVpnVrf,mplsL3VpnVrf,mplsL3VpnIfConf,mplsVpnInterface,mplsL3VpnVrfRT,mplsVpnVrfRouteTarget,mplsLdpEntity',
   },
 );

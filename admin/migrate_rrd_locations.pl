@@ -27,15 +27,15 @@
 #  http://support.opmantek.com/users/
 #
 # *****************************************************************************
-# 
+#
 # this tool migrates all nodes' rrd files from the locations
-# set in the current Common-database.nmis to the new locations (from a 
+# set in the current Common-database.nmis to the new locations (from a
 # separate Common-database.nmis file, e.g. provided by an NMIS upgrade)
 # and updates the Common-database.nmis with the new locations.
-# 
+#
 # nmis collection is disabled while this operation is performed, and a record
 # of operations is kept for rolling back in case of problems.
-our $VERSION = "1.1.0";
+our $VERSION = "1.5.0";
 
 use strict;
 use File::Copy;
@@ -50,13 +50,17 @@ use lib "$FindBin::Bin/../lib";
 use NMIS;
 use func 1.2.1;
 
-my $usage = "Usage: ".basename($0)." newlayout=/path/to/new/Common-database.nmis [simulate=true] [info=true]\n
+my $usage = "Usage: ".basename($0)." newlayout=/path/to/new/Common-database.nmis [simulate=true] [info=true] [missingonly=true]\n
 newlayout: Common-database.nmis file to use for new locations, merged into current one.
 simulate: only show what would be done, don't make any changes
-info: produce more informational output\n\n";
+info: produce more informational output
+missingonly: no renaming, just add missing entries to Common-database.
+\n\n";
 
 my %args=getArguements(@ARGV);
 my $simulate = getbool($args{simulate});
+my $missingonly = getbool($args{missingonly});
+my $leavelocked = getbool($args{leavelocked});
 
 my $base = Cwd::abs_path("$FindBin::RealBin/..");
 
@@ -75,10 +79,11 @@ die "Structure of newlayout not recognizable as Common-database.nmis!\n"
 		if (ref($newlayout) ne "HASH" or ref($newlayout->{database}) ne "HASH");
 
 $SIG{__DIE__} = sub {
-	die @_ if $^S;								# within eval 
+	die @_ if $^S;								# within eval
 
 	&saverollback;
-	print STDERR "\nA fatal error occurred:\n\n",@_,"\nYou can roll back the changes using the script saved in $rollbackf\n\n";
+	print STDERR "\nA fatal error occurred:\n\n",@_,
+	($simulate? "\n\n" : "\nYou can roll back the changes using the script saved in $rollbackf\n\n"); # no need to roll back anything in simulation mode
 	exit 1;
 };
 
@@ -100,10 +105,10 @@ print STDERR "Version $VERSION of ".basename($0)." starting\nReading local node 
 my $LNT = loadLocalNodeTable();
 my (%rrdfiles,$countfiles);
 
-
 # verify that the current common-database doesn't have anything custom that
 # the new shipped version does not have
-my $curlayout = readFiletoHash(file => $C->{'<nmis_models>'}."/Common-database.nmis");
+my $curlayoutfile = $C->{'<nmis_models>'}."/Common-database.nmis";
+my $curlayout = readFiletoHash(file => $curlayoutfile);
 if (ref($curlayout) ne "HASH" or ref($curlayout->{database}) ne "HASH")
 {
 	print STDERR "Cannot fine a current database layout file (Common-database.nmis), cannot proceed with migration!\n";
@@ -117,32 +122,66 @@ for my $oldtypekey (sort keys %{$curlayout->{database}->{type}})
 	{
 		print STDERR "\n\nError: Your current database layout file contains custom entries!\n
 There is an entry for the RRD type \"$oldtypekey\", which is not present
-in the new database layout. This is likely caused by local custom models. 
+in the new database layout. This is likely caused by local custom models.
 This script cannot perform any database migration until all custom types
 are merged into $newdbf, and will abort now.\n\n";
 		exit 1;
 	}
 }
+
+if ($missingonly)
+{
+	print STDERR "Checking for missing entries in current database layout\n";
+	my $needtosave;
 	
+	for my $newtype (keys %{$newlayout->{database}->{type}})
+	{
+		next if exists $curlayout->{database}->{type}->{$newtype};
+		print STDERR "Adding $newtype\n";
+		if (!$simulate)
+		{		
+			$curlayout->{database}->{type}->{$newtype} = 
+					$newlayout->{database}->{type}->{$newtype};
+			$needtosave = 1;
+		}
+	}
+	if ($needtosave)
+	{
+		push @rollback, "mv $curlayoutfile.pre-update $curlayoutfile";
+		rename($curlayoutfile,"$curlayoutfile.pre-update") 
+				or die "Could not rename $curlayoutfile: $!\n";
+		writeHashtoFile(file => $curlayoutfile, data => $curlayout);
 
-
+		# save the rollback file anyway
+		&saverollback;
+		print STDERR "Saving rollback information in $rollbackf\n";
+		print STDERR "Update complete.\n";
+	}
+	else
+	{
+		print STDERR "No missing entries found.\n";
+	}
+	unlink($lockoutfile) if (!$leavelocked);
+	exit 0;
+}
 
 print STDERR "Identifying RRD files to rename\n";
-# find all rrd files for all nodes with sys() objects based on 
+# find all rrd files for all nodes with sys() objects based on
 # the current config, and remember the locations, the types, index, element - everything :-/
 for my $node (sort keys %{$LNT})
 {
 	my $S = Sys->new;
-	$S->init(name=>$node,snmp=>'false');
+	# cache disabled so that the func table_cache gets populated
+	$S->init(name=>$node, snmp=>'false', cache_models => 'false');
 	my $NI = $S->ndinfo;
-		
+	
 	# walk graphtype keys, if hash value: key is index, go one level deeper;
 	# otherwise key of graphtype is all getDBName needs
 	for my $section (keys %{$NI->{graphtype}})
 	{
 		# the generic ones remain where they were - in /metrics/.
 		next if ($section =~ /^(network|nmis|metrics)$/);
-
+		
 		if (ref($NI->{graphtype}->{$section}) eq "HASH")
 		{
 			my $index = $section;
@@ -173,13 +212,13 @@ for my $node (sort keys %{$LNT})
 }
 print STDERR "$countfiles existing RRD files for ".scalar(keys %rrdfiles)." nodes were found.\n";
 
-# now merge the common-database material into the existing common-database.nmis, 
+# now merge the common-database material into the existing common-database.nmis,
 # but only TEMPORARILY and via func's table cache.
 # we update the file only if we're not simulating, and if everything works out, ie. at the very end.
 my $cacheobj = &func::_table_cache;
 my $cachekey = "modelscommon-database";
-die "Error: func.pm's table cache corrupt or nonexistent!\n" 
-		if (ref($cacheobj) ne "HASH" or ref($cacheobj->{$cachekey}) ne "HASH" 
+die "Error: func.pm's table cache corrupt or nonexistent!\n"
+		if (ref($cacheobj) ne "HASH" or ref($cacheobj->{$cachekey}) ne "HASH"
 				or ref($cacheobj->{$cachekey}->{data}) ne "HASH"
 				or ref($cacheobj->{$cachekey}->{data}->{database}) ne "HASH"
 				or ref($cacheobj->{$cachekey}->{data}->{database}->{type}) ne "HASH");
@@ -192,13 +231,14 @@ print STDERR "Determining new RRD file locations.\n";
 for my $node (keys %rrdfiles)
 {
 	# instantiate a new sys obj, with the new, in cache/in-memory common-database values
+	# again, disabling the model cache use so that the massaged table_cache remains in force
 	my $S = Sys->new;
-	$S->init(name=>$node, snmp=>'false');
-
+	$S->init(name=>$node, snmp=>'false', cache_models => 'false');
+	
 	for my $oldname (keys %{$rrdfiles{$node}})
 	{
 		my $meta = $rrdfiles{$node}->{$oldname};
-
+		
 		my $newname = $S->getDBName(graphtype => $meta->{graphtype},
 																index => $meta->{index},
 																item => $meta->{item});
@@ -232,21 +272,21 @@ if (keys %todos and !$simulate)
 		my $newfile = $todos{$oldfile};
 		my $newdir = dirname($newfile);
 		$olddirs{dirname($oldfile)}=1;
-				
+
 		# create the required directories
 		if (!-d $newdir)
 		{
 			push @rollback,"rmdir $newdir";
 			my $error;
 			my $desiredperms = oct($C->{os_execperm} || "0755");
-			File::Path::make_path($newdir, { error => \$error, 
+			File::Path::make_path($newdir, { error => \$error,
 																			 owner => $C->{nmis_user}||"nmis",
 																			 group => $C->{nmis_group} || "nmis",
 																			 mode =>  $desiredperms } ); # umask is applied afterwards :-(
 			if (ref($error) eq "ARRAY" and @$error)
 			{
 				my @errs;
-				for my $issue (@$error) 
+				for my $issue (@$error)
 				{
 					push @errs, join(": ", each %$issue);
 				}
@@ -263,7 +303,7 @@ if (keys %todos and !$simulate)
 		}
 	}
 	print STDERR "Moved all relevant RRD files.\n";
-	
+
 	print STDERR "Cleaning up leftover dirs.\n";
 	# now clean up any left over directories
 	for my $dir (reverse sort keys %olddirs)
@@ -281,25 +321,27 @@ if (keys %todos and !$simulate)
 			unlink($part) if (-d $part);
 		}
 	}
+}
 
+if (!$simulate)
+{
 	print STDERR "Merging current Common-database with new data\n";
 	# finally merge old common-database and the new one's type areas,
 	# save the old common-database.nmis away and replace it with the new one
-	my $curlayoutfile = $C->{'<nmis_models>'}."/Common-database.nmis";
 	my $curlayout = readFiletoHash(file => $curlayoutfile);
 	push @rollback, "mv $curlayoutfile.pre-migrate $curlayoutfile";
 	rename($curlayoutfile,"$curlayoutfile.pre-migrate") or die "Could not rename $curlayoutfile: $!\n";
-	
+
 	$curlayout->{database}->{type} = $newlayout->{database}->{type};
 	writeHashtoFile(file => $curlayoutfile, data => $curlayout);
 
 	# save the rollback file anyway
 	&saverollback;
 	print STDERR "Saving rollback information in $rollbackf\n";
-}
 
-# finally unlock nmis (unconditionally)
-unlink($lockoutfile) if (!$simulate);
+	# finally unlock nmis
+	unlink($lockoutfile) if (!$leavelocked);
+}
 
 if ($simulate)
 {
@@ -321,7 +363,7 @@ sub record_rrd
 	my $fn = $S->getDBName(graphtype => $args{graphtype},
 												 index => $args{index},
 												 item => $args{item});
-	if (!$fn) 
+	if (!$fn)
 	{
 		dbg("node=$args{node}, graphtype=$args{graphtype}, index=$args{index}, item=$args{item}: NO db known!",2);
 		return;
@@ -331,10 +373,13 @@ sub record_rrd
 		dbg("node=$args{node}, graphtype=$args{graphtype}, index=$args{index}, item=$args{item}:\n\tfile $fn does not exist.",2);
 		return;
 	}
-	
+
 	if (exists $rrdfiles{$args{node}}->{$fn})
 	{
-		die "error: $fn already known! node=$args{node}, graphtype=$args{graphtype}, index=$args{index}, item=$args{item}\n";
+		my $old = $rrdfiles{$args{node}}->{$fn};
+		die "error: $fn already known!\n
+clash between old node=$old->{node}, graphtype=$old->{graphtype}, index=$old->{index}, item=$old->{item}
+and new node=$args{node}, graphtype=$args{graphtype}, index=$args{index}, item=$args{item}\n";
 	}
 
 	$rrdfiles{$args{node}}->{$fn} = {%args};
@@ -351,4 +396,3 @@ sub saverollback
 	print F join("\n", reverse @rollback)."\n";
 	close F;
 }
-	

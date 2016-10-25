@@ -1,0 +1,691 @@
+#
+## $Id: Common-database.nmis,v 8.4 2012/08/14 12:20:36 keiths Exp $
+#
+#  Copyright 1999-2011 Opmantek Limited (www.opmantek.com)
+#  
+#  ALL CODE MODIFICATIONS MUST BE SENT TO CODE@OPMANTEK.COM
+#  
+#  This file is part of Network Management Information System (“NMIS”).
+#  
+#  NMIS is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#  
+#  NMIS is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#  
+#  You should have received a copy of the GNU General Public License
+#  along with NMIS (most likely in a file named LICENSE).  
+#  If not, see <http://www.gnu.org/licenses/>
+#  
+#  For further information on NMIS or for a license other than GPL please see
+#  www.opmantek.com or email contact@opmantek.com 
+#  
+#  User group details:
+#  http://support.opmantek.com/users/
+#  
+# *****************************************************************************
+
+%hash = (
+  'systemHealth' => {
+    'sys' => {
+
+      'mplsLdpEntity' => {      	
+        'index_regex' => '166\.4\.1\.2\.3\.1\.4\.(.+)$',
+        'index_oid' => '1.3.6.1.2.1.10.166.4.1.2.3.1.4',
+        'indexed' => 'mplsLdpEntityAdminStatus',
+        'headers' => 'mplsLdpEntityAdminStatus,mplsLdpEntityOperStatus,mplsLdpEntityTargetedPeer,mplsLdpEntityTargetedPeerAddrType,mplsLdpEntityTargetedPeerAddr,mplsLdpEntityRowStatus',
+        'snmp' => {
+          'mplsLdpEntityLdpId' => {
+            'title' => 'LdpId'
+          },
+          'mplsLdpEntityIndex' => {
+            'title' => 'LdpEntityIndex'
+          },
+          'mplsLdpEntityAdminStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.2.3.1.4',
+            'title' => 'LdpEntityAdminStatus',
+            'replace' => {
+              '1' => 'enable',
+              '2' => 'disable',
+            },
+          },
+          'mplsLdpEntityOperStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.2.3.1.5',
+            'title' => 'LdpEntityOperStatus',
+            'replace' => {
+              '1' => 'enable',
+              '2' => 'disable',
+            },
+          },
+          'mplsLdpEntityTargetedPeer' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.2.3.1.17',
+            'title' => 'LdpEntityTargetedPeer',
+            'replace' => {
+              '1' => 'true',
+              '2' => 'false',
+            },
+          },
+          'mplsLdpEntityTargetedPeerAddrType' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.2.3.1.18',
+            'title' => 'LdpEntityTargetedPeerAddrType',
+            'replace' => {
+              '0' => 'other',
+              '1' => 'ipV4',
+              '2' => 'ipV6',
+              '3' => 'nsap',
+              '4' => 'hdlc',
+              '5' => 'bbn1822',
+              '6' => 'all802',
+              '7' => 'e163',
+              '8' => 'e164',
+              '9' => 'f69',
+              '10' => 'x121',
+              '11' => 'ipx',
+              '12' => 'appletalk',
+              '13' => 'decnetIV',
+              '14' => 'banyanVines',
+              '15' => 'e164withNsap',
+              '16' => 'dns',
+              '17' => 'distinguishedname',
+              '18' => 'asnumber',
+              '19' => 'xtpoveripv4',
+              '20' => 'xtpoveripv6',
+              '21' => 'xtpnativemodextp',
+              '65535' => 'reserved'
+            },
+          },
+          'mplsLdpEntityTargetedPeerAddr' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.2.3.1.19',
+            'title' => 'LdpEntityTargetedPeerAddr',
+            'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
+          },
+          'mplsLdpEntityRowStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.4.1.2.3.1.23',
+            'title' => 'LdpEntityRowStatus',
+            'replace' => {
+              '1' => 'active',
+              '2' => 'notInService',
+              '3' => 'notReady',
+              '4' => 'createAndGo',
+              '5' => 'createAndWait',
+              '6' => 'destroy',
+            },
+          },          
+        },
+      },
+
+      'mplsL3VpnVrf' => {
+        'index_oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.3',
+        'index_regex' => '166\.11\.1\.2\.2\.1\.3\.(.+)$',
+        'indexed' => 'mplsVpnVrfDescription',
+        'headers' => 'mplsL3VpnVrfName,mplsL3VpnVrfVpnId,mplsL3VpnVrfDescription,mplsL3VpnVrfRD,mplsL3VpnVrfCreationTime,mplsL3VpnVrfOperStatus,mplsL3VpnVrfActiveInterfaces,mplsL3VpnVrfAssociatedInterfaces,mplsL3VpnVrfConfRowStatus,mplsL3VpnVrfConfAdminStatus,mplsL3VpnVrfConfStorageType',
+        'snmp' => {
+          'mplsL3VpnVrfName' => {
+            'title' => 'VrfName'
+          },
+          'mplsL3VpnVrfVpnId' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.2',
+            'title' => 'VrfVpnId'
+          },
+          'mplsL3VpnVrfDescription' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.3',
+            'title' => 'VrfDescription'
+          },
+          'mplsL3VpnVrfRD' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.4',
+            'title' => 'VrfRD',
+          },
+          'mplsL3VpnVrfCreationTime' => { 
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.5',
+            'title' => 'VrfCreationTime'
+          },
+          'mplsL3VpnVrfOperStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.6',
+            'title' => 'VrfOperStatus',
+            'replace' => {
+              '1' => 'up',
+              '2' => 'down',
+            },
+          },
+          'mplsL3VpnVrfActiveInterfaces' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.7',
+            'title' => 'VrfActiveInterfaces'
+          },
+          'mplsL3VpnVrfAssociatedInterfaces' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.8',
+            'title' => 'VrfAssociatedInterfaces'
+          },
+          'mplsL3VpnVrfConfRowStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.13',
+            'title' => 'VrfConfRowStatus',
+            'replace' => {
+              '1' => 'active',
+              '2' => 'notInService',
+              '3' => 'notReady',
+              '4' => 'createAndGo',
+              '5' => 'createAndWait',
+              '6' => 'destroy',
+            },
+          },
+          'mplsL3VpnVrfConfAdminStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.14',
+            'title' => 'VrfConfAdminStatus',
+            'replace' => {
+              '1' => 'up',
+              '2' => 'down',
+              '3' => 'testing',
+            },
+          },
+          'mplsL3VpnVrfConfStorageType' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.2.1.15',
+            'title' => 'VrfConfStorageType',
+            'replace' => {
+              '1' => 'other',
+              '2' => 'volatile',
+              '3' => 'nonVolatile',
+              '4' => 'permanent',
+              '5' => 'readOnly',
+            },
+          },
+        },
+      },
+
+      'mplsL3VpnIfConf' => {
+        'index_regex' => '166\.11\.1\.2\.1\.1\.2\.(.+)$',
+        'index_oid' => '1.3.6.1.2.1.10.166.11.1.2.1.1.2',
+        'indexed' => 'mplsL3VpnIfVpnClassification',
+        'headers' => 'mplsL3VpnVrfName,mplsL3VpnIfConfIndex,ifDescr,mplsL3VpnIfVpnClassification,mplsL3VpnIfConfStorageType,mplsL3VpnIfConfRowStatus',
+        'snmp' => {
+          'mplsL3VpnVrfName' => {
+            'title' => 'VrfName'
+          },
+          'mplsL3VpnIfConfIndex' => {
+            'title' => 'IfConfIndex'
+          },
+          'ifDescr' => {
+            'title' => 'ifDescr'
+          },
+          'mplsL3VpnIfVpnClassification' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.1.1.2',
+            'title' => 'Classification',
+            'replace' => {
+              '1' => 'carrierOfCarrier',
+              '2' => 'enterprise',
+              '3' => 'interProvider',
+            },
+          },
+          'mplsL3VpnIfVpnRouteDistProtocol' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.1.1.3',
+            'title' => 'RouteDistProtocol',
+            'replace' => {
+              '0' => 'none',
+              '1' => 'bgp',
+              '2' => 'ospf',
+              '3' => 'rip',
+              '4' => 'isis',
+              '5' => 'static',
+              '6' => 'other',
+            },
+          },
+          'mplsL3VpnIfConfStorageType' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.1.1.4',
+            'title' => 'ConfStorageType',
+            'replace' => {
+              '1' => 'other',
+              '2' => 'volatile',
+              '3' => 'nonVolatile',
+              '4' => 'permanent',
+              '5' => 'readOnly',
+            },
+          },
+          'mplsL3VpnIfConfRowStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.1.1.5',
+            'title' => 'ConfRowStatus',
+            'replace' => {
+              '1' => 'active',
+              '2' => 'notInService',
+              '3' => 'notReady',
+              '4' => 'createAndGo',
+              '5' => 'createAndWait',
+              '6' => 'destroy',
+            },
+          },
+        },
+      },
+
+      'mplsL3VpnVrfRT' => {
+        'index_regex' => '166\.11\.1\.2\.3\.1\.5\.(.+)$',
+        'index_oid' => '1.3.6.1.2.1.10.166.11.1.2.3.1.5',
+        'indexed' => 'mplsVpnVrfRouteTarget',
+        'headers' => 'mplsL3VpnVrfName,mplsL3VpnVrfRTIndex,mplsL3VpnVrfRTType,mplsL3VpnVrfRT,mplsL3VpnVrfRTDescr,mplsL3VpnVrfRTRowStatus,mplsL3VpnVrfRTStorageType',
+        'snmp' => {
+          'mplsL3VpnVrfName' => {
+            'title' => 'VrfName'
+          },
+          'mplsL3VpnVrfRTIndex' => {
+            'title' => 'RTIndex'
+          },
+          'mplsL3VpnVrfRTType' => {
+            'title' => 'RTType'
+          },
+          'mplsL3VpnVrfRT' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.3.1.4',
+            'title' => 'RT',
+          },
+          'mplsL3VpnVrfRTDescr' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.3.1.5',
+            'title' => 'RTDescr',
+          },          
+          'mplsL3VpnVrfRTRowStatus' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.3.1.6',
+            'title' => 'RTRowStatus',
+            'replace' => {
+              '1' => 'active',
+              '2' => 'notInService',
+              '3' => 'notReady',
+              '4' => 'createAndGo',
+              '5' => 'createAndWait',
+              '6' => 'destroy',
+            },
+          },
+          'mplsL3VpnVrfRTStorageType' => {
+            'oid' => '1.3.6.1.2.1.10.166.11.1.2.3.1.7',
+            'title' => 'RTStorageType',
+            'replace' => {
+              '1' => 'other',
+              '2' => 'volatile',
+              '3' => 'nonVolatile',
+              '4' => 'permanent',
+              '5' => 'readOnly',
+            },
+          },
+        },
+      },
+       
+      'mplsVpnVrf' => {
+        'index_oid' => '1.3.6.1.3.118.1.2.2.1.2',
+        'index_regex' => '118\.1\.2\.2\.1\.2\.(.+)$',
+        'indexed' => 'mplsVpnVrfDescription',
+        'headers' => 'mplsVpnVrfName,mplsVpnVrfDescription,mplsVpnVrfRouteDistinguisher,mplsVpnVrfCreationTime,mplsVpnVrfOperStatus,mplsVpnVrfActiveInterfaces,mplsVpnVrfAssociatedInterfaces,mplsVpnVrfConfRowStatus,mplsVpnVrfConfStorageType',
+        'snmp' => {
+          'mplsVpnVrfName' => {
+            'title' => 'VrfName'
+          },
+          'mplsVpnVrfDescription' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.2',
+            'title' => 'VrfDescription'
+          },
+          'mplsVpnVrfRouteDistinguisher' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.3',
+            'title' => 'VrfRouteDistinguisher',
+          },
+          'mplsVpnVrfCreationTime' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.4',
+            'title' => 'VrfCreationTime'
+          },
+          'mplsVpnVrfOperStatus' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.5',
+            'title' => 'VrfOperStatus',
+            'replace' => {
+              '1' => 'up',
+              '2' => 'down',
+            },
+          },
+          'mplsVpnVrfActiveInterfaces' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.6',
+            'title' => 'VrfActiveInterfaces'
+          },
+          'mplsVpnVrfAssociatedInterfaces' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.7',
+            'title' => 'VrfAssociatedInterfaces'
+          },
+          'mplsVpnVrfConfRowStatus' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.12',
+            'title' => 'VrfConfRowStatus',
+            'replace' => {
+              '1' => 'active',
+              '2' => 'notInService',
+              '3' => 'notReady',
+              '4' => 'createAndGo',
+              '5' => 'createAndWait',
+              '6' => 'destroy',
+            },
+          },
+          'mplsVpnVrfConfStorageType' => {
+            'oid' => '1.3.6.1.3.118.1.2.2.1.13',
+            'title' => 'VrfConfStorageType',
+            'replace' => {
+              '1' => 'other',
+              '2' => 'volatile',
+              '3' => 'nonVolatile',
+              '4' => 'permanent',
+              '5' => 'readOnly',
+            },
+          },
+        },
+      },
+
+      'mplsVpnInterface' => {
+        'index_regex' => '118\.1\.2\.1\.1\.2\.(.+)$',
+        'index_oid' => '1.3.6.1.3.118.1.2.1.1.2',
+        'indexed' => 'mplsVpnInterfaceLabelEdgeType',
+        'headers' => 'mplsVpnVrfName,ifIndex,ifDescr,mplsVpnInterfaceLabelEdgeType,mplsVpnInterfaceVpnClassification,mplsVpnInterfaceConfStorageType,mplsVpnInterfaceVpnRouteDistProtocol,mplsVpnInterfaceConfRowStatus',
+        'snmp' => {
+          'mplsVpnVrfName' => {
+            'title' => 'VrfName'
+          },
+          'ifIndex' => {
+            'title' => 'ifIndex'
+          },
+          'ifDescr' => {
+            'title' => 'ifDescr'
+          },
+          'mplsVpnInterfaceLabelEdgeType' => {
+            'oid' => '1.3.6.1.3.118.1.2.1.1.2',
+            'title' => 'InterfaceLabelEdgeType',
+            'replace' => {
+              '1' => 'providerEdge',
+              '2' => 'customerEdge',
+            },
+          },
+          'mplsVpnInterfaceVpnClassification' => {
+            'oid' => '1.3.6.1.3.118.1.2.1.1.3',
+            'title' => 'InterfaceVpnClassification',
+            'replace' => {
+              '1' => 'carrierOfCarrier',
+              '2' => 'enterprise',
+              '3' => 'interProvider',
+            },
+          },
+          'mplsVpnInterfaceConfStorageType' => {
+            'oid' => '1.3.6.1.3.118.1.2.1.1.4',
+            'title' => 'InterfaceConfStorageType',
+            'replace' => {
+              '1' => 'other',
+              '2' => 'volatile',
+              '3' => 'nonVolatile',
+              '4' => 'permanent',
+              '5' => 'readOnly',
+            },
+          },
+          'mplsVpnInterfaceVpnRouteDistProtocol' => {
+            'oid' => '1.3.6.1.3.118.1.2.1.1.5',
+            'title' => 'InterfaceVpnRouteDistProtocol'
+          },
+          'mplsVpnInterfaceConfRowStatus' => {
+            'oid' => '1.3.6.1.3.118.1.2.1.1.6',
+            'title' => 'InterfaceConfRowStatus',
+            'replace' => {
+              '1' => 'active',
+              '2' => 'notInService',
+              '3' => 'notReady',
+              '4' => 'createAndGo',
+              '5' => 'createAndWait',
+              '6' => 'destroy',
+            },
+          },
+        },
+      },
+
+      'mplsVpnVrfRouteTarget' => {
+        'index_regex' => '118\.1\.2\.3\.1\.4\.(.+)$',
+        'index_oid' => '1.3.6.1.3.118.1.2.3.1.4',
+        'indexed' => 'mplsVpnVrfRouteTarget',
+        'headers' => 'mplsVpnVrfName,mplsVpnVrfRouteTargetIndex,mplsVpnVrfRouteTargetType,mplsVpnVrfRouteTarget,mplsVpnVrfRouteTargetDescr,mplsVpnVrfRouteTargetRowStatus',
+        'snmp' => {
+          'mplsVpnVrfName' => {
+            'title' => 'VrfName'
+          },
+          'mplsVpnVrfRouteTargetIndex' => {
+            'title' => 'RouteTargetIndex'
+          },
+          'mplsVpnVrfRouteTargetType' => {
+            'title' => 'RouteTargetType'
+          },
+          
+          'mplsVpnVrfRouteTarget' => {
+            'oid' => '1.3.6.1.3.118.1.2.3.1.4',
+            'title' => 'RouteTarget',
+          },
+          'mplsVpnVrfRouteTargetDescr' => {
+            'oid' => '1.3.6.1.3.118.1.2.3.1.5',
+            'title' => 'RouteTargetDescr',
+          },          
+          'mplsVpnVrfRouteTargetRowStatus' => {
+            'oid' => '1.3.6.1.3.118.1.2.3.1.6',
+            'title' => 'RouteTargetRowStatus',
+            'replace' => {
+              '1' => 'active',
+              '2' => 'notInService',
+              '3' => 'notReady',
+              '4' => 'createAndGo',
+              '5' => 'createAndWait',
+              '6' => 'destroy',
+            },
+          },
+        },
+      },
+       
+      #'mplsVpnLdpCisco' => {
+      #  'index_regex' => '65\.1\.2\.2\.1\.4\.(.+)$',
+      #  'index_oid' => '1.3.6.1.4.1.9.10.65.1.2.2.1.4',
+      #  'indexed' => 'mplsLdpEntityAdminStatus',
+      #  'headers' => 'index,mplsLdpEntityAdminStatus,mplsLdpEntityOperStatus,mplsLdpEntityTargetedPeer,mplsLdpEntityTargetedPeerAddrType,mplsLdpEntityTargetedPeerAddr,mplsLdpEntityRowStatus',
+      #  'snmp' => {
+      #    'mplsLdpEntityLdpId' => {
+      #      'title' => 'mplsLdpEntityLdpId'
+      #    },
+      #    'mplsLdpEntityIndex' => {
+      #      'title' => 'mplsLdpEntityIndex'
+      #    },
+      #    'mplsLdpEntityAdminStatus' => {
+      #      'oid' => '1.3.6.1.4.1.9.10.65.1.2.2.1.4',
+      #      'title' => 'mplsLdpEntityAdminStatus',
+      #      'replace' => {
+      #        '1' => 'enable',
+      #        '2' => 'disable',
+      #      },
+      #    },
+      #    'mplsLdpEntityOperStatus' => {
+      #      'oid' => '1.3.6.1.4.1.9.10.65.1.2.2.1.5',
+      #      'title' => 'mplsLdpEntityOperStatus',
+      #      'replace' => {
+      #        '1' => 'enable',
+      #        '2' => 'disable',
+      #      },
+      #    },
+      #    
+      #    'mplsLdpEntityTargetedPeer' => {
+      #      'oid' => '1.3.6.1.4.1.9.10.65.1.2.2.1.17',
+      #      'title' => 'mplsLdpEntityTargetedPeer',
+      #      'replace' => {
+      #        '1' => 'true',
+      #        '2' => 'false',
+      #      },
+      #    },
+      #    
+      #    'mplsLdpEntityTargetedPeerAddrType' => {
+      #      'oid' => '1.3.6.1.4.1.9.10.65.1.2.2.1.18',
+      #      'title' => 'mplsLdpEntityTargetedPeerAddrType',
+      #      'replace' => {
+      #        '0' => 'other',
+      #        '1' => 'ipV4',
+      #        '2' => 'ipV6',
+      #        '3' => 'nsap',
+      #        '4' => 'hdlc',
+      #        '5' => 'bbn1822',
+      #        '6' => 'all802',
+      #        '7' => 'e163',
+      #        '8' => 'e164',
+      #        '9' => 'f69',
+      #        '10' => 'x121',
+      #        '11' => 'ipx',
+      #        '12' => 'appletalk',
+      #        '13' => 'decnetIV',
+      #        '14' => 'banyanVines',
+      #        '15' => 'e164withNsap',
+      #        '16' => 'dns',
+      #        '17' => 'distinguishedname',
+      #        '18' => 'asnumber',
+      #        '19' => 'xtpoveripv4',
+      #        '20' => 'xtpoveripv6',
+      #        '21' => 'xtpnativemodextp',
+      #        '65535' => 'reserved'
+      #      },
+      #    },
+      #    'mplsLdpEntityTargetedPeerAddr' => {
+      #      'oid' => '1.3.6.1.4.1.9.10.65.1.2.2.1.19',
+      #      'title' => 'mplsLdpEntityTargetedPeerAddr',
+      #      'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
+      #    },
+      #    'mplsLdpEntityRowStatus' => {
+      #      'oid' => '1.3.6.1.4.1.9.10.65.1.2.2.1.23',
+      #      'title' => 'mplsLdpEntityRowStatus',
+      #    },          
+      #  },
+      #},
+
+      'CiscoPseudowireVC' => {
+        'index_oid' => '1.3.6.1.4.1.9.10.106.1.2.1.2',
+        'indexed' => 'cpwVcType',
+        'headers' => 'index,cpwVcType,cpwVcPsnType,cpwVcPeerAddr,cpwVcID,cpwVcLocalIfString,cpwVcRemoteIfString,cpwVcOutboundVcLabel,cpwVcInboundVcLabel,cpwVcName,cpwVcDescr,cpwVcAdminStatus,cpwVcOperStatus',
+        'snmp' => {
+          'cpwVcType' => {
+          	'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.2',
+            'title' => 'VcType',
+            'replace' => {
+              '0' => 'other',
+              '1' => 'frameRelay',
+              '2' => 'atmAal5Vcc',
+              '3' => 'atmTransparent',
+              '4' => 'ethernetVLAN',
+              '5' => 'ethernet',
+              '6' => 'hdlc',
+              '7' => 'ppp',
+              '8' => 'cep',
+              '9' => 'atmVccCell',
+              '10' => 'atmVpcCell',
+              '11' => 'ethernetVPLS',
+              '12' => 'e1Satop',
+              '13' => 't1Satop',
+              '14' => 'e3Satop',
+              '15' => 't3Satop',
+              '16' => 'basicCesPsn',
+              '17' => 'basicTdmIp',
+              '18' => 'tdmCasCesPsn',
+              '19' => 'tdmCasTdmIp',
+            },
+          },          
+          'cpwVcPsnType' => {
+          	'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.4',
+            'title' => 'VcPsnType',
+            'replace' => {
+              '1' => 'mpls',
+              '2' => 'l2tp',
+              '3' => 'ip',
+              '4' => 'mplsOverIp',
+              '5' => 'gre',
+              '6' => 'other',
+            },
+          },
+          'cpwVcPeerAddr' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.9',
+            'title' => 'VcPeerAddr',
+            'calculate' => '$r =~ s/^0x//; $r = join ".", map { hex } $r =~ /../g;',
+          },
+          'cpwVcID' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.10',
+            'title' => 'VcID',
+          },
+          'cpwVcLocalIfString' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.14',
+            'title' => 'VcLocalIfString',
+            'replace' => {
+              '0' => 'unknown',
+              '1' => 'true',
+              '2' => 'false',
+            },
+          },
+          'cpwVcRemoteIfString' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.18',
+            'title' => 'VcRemoteIfString',
+          },          
+          'cpwVcOutboundVcLabel' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.19',
+            'title' => 'VcOutboundVcLabel',
+          },          
+          'cpwVcInboundVcLabel' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.20',
+            'title' => 'VcInboundVcLabel',
+          },          
+          'cpwVcName' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.21',
+            'title' => 'VcName',
+          },          
+          'cpwVcDescr' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.22',
+            'title' => 'VcDescr',
+          },          
+          'cpwVcAdminStatus' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.25',
+            'title' => 'VcAdminStatus',
+            'replace' => {
+              '1' => 'up',
+              '2' => 'down',
+              '3' => 'testing',
+              '4' => 'unknown',
+              '5' => 'dormant',
+              '6' => 'notPresent',
+              '7' => 'lowerLayerDown',
+            },
+          },          
+          'cpwVcOperStatus' => {
+            'oid' => '1.3.6.1.4.1.9.10.106.1.2.1.26',
+            'title' => 'VcOperStatus',
+            'replace' => {
+              '1' => 'up',
+              '2' => 'down',
+              '3' => 'testing',
+            },
+          },          
+        },
+      },
+
+      #CISCO-IETF-PW-MIB::cpwVcType.1 = INTEGER: ethernet(5)
+      #CISCO-IETF-PW-MIB::cpwVcOwner.1 = INTEGER: maintenanceProtocol(2)
+      #CISCO-IETF-PW-MIB::cpwVcPsnType.1 = INTEGER: mpls(1)
+      #CISCO-IETF-PW-MIB::cpwVcSetUpPriority.1 = INTEGER: 0
+      #CISCO-IETF-PW-MIB::cpwVcHoldingPriority.1 = INTEGER: 0
+      #CISCO-IETF-PW-MIB::cpwVcInboundMode.1 = INTEGER: loose(1)
+      #CISCO-IETF-PW-MIB::cpwVcPeerAddrType.1 = INTEGER: ipv4(1)
+      #CISCO-IETF-PW-MIB::cpwVcPeerAddr.1 = Hex-STRING: AC 17 00 75 
+      #CISCO-IETF-PW-MIB::cpwVcID.1 = Gauge32: 400
+      #CISCO-IETF-PW-MIB::cpwVcLocalGroupID.1 = Gauge32: 0
+      #CISCO-IETF-PW-MIB::cpwVcControlWord.1 = INTEGER: true(1)
+      #CISCO-IETF-PW-MIB::cpwVcLocalIfMtu.1 = Gauge32: 1526
+      #CISCO-IETF-PW-MIB::cpwVcLocalIfString.1 = INTEGER: true(1)
+      #CISCO-IETF-PW-MIB::cpwVcRemoteGroupID.1 = Gauge32: 0
+      #CISCO-IETF-PW-MIB::cpwVcRemoteControlWord.1 = INTEGER: withControlWord(2)
+      #CISCO-IETF-PW-MIB::cpwVcRemoteIfMtu.1 = Gauge32: 1526
+      #CISCO-IETF-PW-MIB::cpwVcRemoteIfString.1 = STRING: 
+      #CISCO-IETF-PW-MIB::cpwVcOutboundVcLabel.1 = Gauge32: 9607
+      #CISCO-IETF-PW-MIB::cpwVcInboundVcLabel.1 = Gauge32: 739
+      #CISCO-IETF-PW-MIB::cpwVcName.1 = STRING: 
+      #CISCO-IETF-PW-MIB::cpwVcDescr.1 = STRING: 
+      #CISCO-IETF-PW-MIB::cpwVcCreateTime.1 = Timeticks: (2946932932) 341 days, 1:55:29.32
+      #CISCO-IETF-PW-MIB::cpwVcUpTime.1 = Timeticks: (2220795923) 257 days, 0:52:39.23
+      #CISCO-IETF-PW-MIB::cpwVcAdminStatus.1 = INTEGER: up(1)
+      #CISCO-IETF-PW-MIB::cpwVcOperStatus.1 = INTEGER: up(1)
+      #CISCO-IETF-PW-MIB::cpwVcInboundOperStatus.1 = INTEGER: up(1)
+      #CISCO-IETF-PW-MIB::cpwVcOutboundOperStatus.1 = INTEGER: up(1)
+      #CISCO-IETF-PW-MIB::cpwVcTimeElapsed.1 = INTEGER: 0
+      #CISCO-IETF-PW-MIB::cpwVcValidIntervals.1 = INTEGER: 0
+      #CISCO-IETF-PW-MIB::cpwVcRowStatus.1 = INTEGER: active(1)
+      #CISCO-IETF-PW-MIB::cpwVcStorageType.1 = INTEGER: volatile(2)
+    }
+  }
+);

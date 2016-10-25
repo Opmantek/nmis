@@ -1,52 +1,115 @@
 #!/usr/bin/perl
 # a small helper script for testing web sites end-to-end
+#
 # args: url
 # -c expected content (regex, case-insensitive)
 # -s expected status code (regex)
+# -f tells it to follow up to N redirections
 # -N makes the script ignore SSL certificate issues completely
+# -p sets a specific web proxy, no proxies used otherwise
+#
 # exits with 100 if ok, 50 if the code is ok but the body is wrong, 0 otherwise
+our $VERSION = "1.3.0";
+
 use strict;
 use LWP::UserAgent;
 use Getopt::Std;
+use Time::HiRes;
 
 my %opts;
-die "Usage: $0 [-c content-regex] [-s status-regex] [-f #redirs] [-N] <url>
+die "Usage: $0 [options] <url>
+-s regex: regular expression for ok http status code
+-c regex: regular expression for ok body content
 -f N: follow up to N redirections
+-D: send no-caching request headers
 -N: do NOT verify SSL certificates
+-d: append debug output to the given file
+-p http://proxy:port/ sets up access via web proxy
 \n\n"
-		if (!getopts("c:s:f:N",\%opts) or @ARGV != 1);
+		if (!getopts("c:s:f:Nd:p:D",\%opts) or @ARGV != 1);
 
 my $okcode = $opts{s}? qr/$opts{s}/ : qr/200/;
 my $okbody = $opts{c} &&  qr/$opts{c}/i;
 my $redirs = defined $opts{f}? $opts{f} : 0;
 my $url = $ARGV[0];
 
+my $dfh;
+if ($opts{d})
+{
+	open($dfh, ">>$opts{d}") or die "cannot write to debug file $opts{d}: $!\n";
+	print $dfh "\n".Time::HiRes::time." starting: url $url, okcode $okcode, okbody $okbody, redirs $redirs, ignorecerts $opts{N}\n";
+}
+
+# depending on your version of libwww-perl, LWP::Protocol::https may or may not be included
+# but for https sites it's required
+if ($url =~ m!https!)
+{
+	eval { require LWP::Protocol::https; };
+	if ($@)
+	{
+		print "Error: Cannot check https service, module LWP::Protocol::https is missing!";
+		print $dfh Time::HiRes::time." Error: Cannot check https service, module LWP::Protocol::https is missing!\n" if ($dfh);
+		exit 0;
+	}
+}
+
 my @ua_args;
-push @ua_args, 
+push @ua_args,
 		(ssl_opts => { verify_hostname => 0, SSL_verify_mode => 0 }) if ($opts{N});
 my $ua = LWP::UserAgent->new(@ua_args);
 # mostly we want to receive the redirect, not follow it
-$ua->max_redirect($redirs); 					
-$ua->env_proxy(0);							# no proxying for end-to-end testing
+$ua->max_redirect($redirs);
+
+if ($opts{p})
+{
+	$ua->proxy([qw(http https)], $opts{p});
+	print $dfh Time::HiRes::time." setting proxy for http and https to $opts{p}\n" if ($dfh);
+}
+
+
 
 my $exitcode = 0;
 my $statusmsg = "Unknown Failure";
 
-my $res = $ua->get($url);
+$url = "http://$url" if ($url !~ m!^([a-z]+)://!);
+
+my @starttime = Time::HiRes::gettimeofday;
+print $dfh Time::HiRes::time." issuing GET".($opts{D}? " with no-cache headers":"")."\n"  if ($dfh);
+
+
+my $res = ($opts{D})? $ua->get($url, 
+															 "Pragma" => "no-cache", 
+															 "Cache-Control" => "no-cache") : $ua->get($url);
+my $responsetime = Time::HiRes::tv_interval(\@starttime);
+my $contentlength = length($res->decoded_content);
+
+print $dfh Time::HiRes::time." done with GET, response status ".$res->status_line
+		.", content length $contentlength\n" if ($dfh);
 if ($res->code =~ $okcode)
 {
+	print $dfh Time::HiRes::time." status code matches okcode\n" if ($dfh);
 	$exitcode = 100;
 	$statusmsg = "Page OK";
 
 	if ($okbody && $res->decoded_content !~ $okbody)
 	{
+		print $dfh Time::HiRes::time." code does NOT match okbody\n" if ($dfh);
 		$exitcode = 50;
 		$statusmsg = "Page downloaded OK but content invalid!";
 	}
 }
+else
+{
+	print $dfh Time::HiRes::time." status code bad\n" if ($dfh);
+	$statusmsg .= ", response was '".$res->status_line."'";
+}
 
-print "$statusmsg\n";
+if ($dfh)
+{
+	print $dfh Time::HiRes::time." done, will exit with $exitcode, response time $responsetime\n";
+	close $dfh;
+}
+
+print "$statusmsg\nresponsetime=$responsetime\ncontentlength=$contentlength\n";
 # 100 is ok, 0 is 'service is down'
 exit $exitcode;
-
-
