@@ -73712,4 +73712,12 @@
     'Enterprise' => 'Mimosa',
     'OID' => '43356'
   },
+  '29671' => {
+    'Enterprise' => 'Meraki Networks, Inc.',
+    'OID' => '29671'
+  },
+  '41112' => {
+    'Enterprise' => 'Ubiquiti Networks, Inc.',
+    'OID' => '41112'
+  },
 );
