@@ -29,7 +29,7 @@
 # *****************************************************************************
 #
 # this helper upgrades model files where safe to do so
-our $VERSION="8.6.0a";
+our $VERSION="8.6.1G";
 
 use strict;
 use Digest::MD5;								# good enough
@@ -183,7 +183,7 @@ Common-asset.nmis f6c2fe2777c14437
 Common-calls.nmis 77ca79216fd1aefa
 Common-cbqos-in.nmis 68c58453714e91dc a0bbc467ffd18646 6c8df3ec0d0c0858
 Common-cbqos-out.nmis ab31ff8eee5db591 48665448110af552 1210e379c4b6a92d
-Common-database.nmis 0cf0a876087bd7f2 b3d083221e94f22c 8b309566ec783d52 6514b77ecc0dd2c8 5bacf781a1495ba5 a934b015029bbe63 a41276db67e9be61 92a7f5ebc9af25aa 5f1f1a8792f0498d b70fbcbf9e210596 1b1d1620e6b66683 5dbac9d4f0590b2c 2227e7b78b5547b4 e56cad8dc7066418 4bd336af049d4135 411a0d92a51a96a3
+Common-database.nmis b32bf11f5b860b3e b3d083221e94f22c 8b309566ec783d52 6514b77ecc0dd2c8 5bacf781a1495ba5 a934b015029bbe63 a41276db67e9be61 92a7f5ebc9af25aa 5f1f1a8792f0498d b70fbcbf9e210596 1b1d1620e6b66683 5dbac9d4f0590b2c 2227e7b78b5547b4 e56cad8dc7066418 4bd336af049d4135 0cf0a876087bd7f2 411a0d92a51a96a3
 Common-entityMib.nmis 23129c70d072e098
 Common-event.nmis 3c17ac2753efd729
 Common-heading.nmis 56bbc1eafea2ffbb dc1e5ee59839f42a 6b6ffeeb92a8996f fc120bc0906f3b70 7e458f0172e120ea 0f6d824494640deb 8e453ea283e3fd7a c1c8d886c4c7f7f1 4be5135841352538 a2c592a8fe826493 f652ed992cf8d4a2 087587a01227a79e 1c1c2e7cf3a0606c 5c37adf22c7f4ab4 c2bd5a05f75efac3
