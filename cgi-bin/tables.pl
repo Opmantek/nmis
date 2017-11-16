@@ -27,47 +27,49 @@
 #  http://support.opmantek.com/users/
 #
 # *****************************************************************************
-# Auto configure to the <nmis-base>/lib
+use strict;
+our $VERSION="8.6.2G";
+
 use FindBin;
 use lib "$FindBin::Bin/../lib";
 
-#
-use strict;
+use CGI qw(:standard *table *Tr *td *form *Select *div);
+use Data::Dumper;
+use URI::Escape;
+use Net::IP;
+
 use NMIS;
 use NMIS::UUID;
 use Sys;
 use func;
 use csv;
-use Net::hostent;
-use Socket;
-use Data::Dumper;
-use URI::Escape;
 
+use Auth;
 use DBfunc;
-
-use CGI qw(:standard *table *Tr *td *form *Select *div);
 
 my $q = new CGI; # This processes all parameters passed via GET and POST
 my $Q = $q->Vars; # values in hash
-my $C;
+my $C = loadConfTable(conf=>$Q->{conf},debug=>$Q->{debug});
 
-if (!($C = loadConfTable(conf=>$Q->{conf},debug=>$Q->{debug}))) { exit 1; };
+die "failed to load configuration!\n" if (!$C or ref($C) ne "HASH" or !keys %$C);
 
-# Before going any further, check to see if we must handle
-# an authentication login or logout request
+# if arguments present, then called from command line
+if ( @ARGV ) { $C->{auth_require} = 0; } # bypass auth
 
-# NMIS Authentication module
-use Auth;
 
 # variables used for the security mods
 my $headeropts = {type=>'text/html',expires=>'now'};
-my $AU = Auth->new(conf => $C);  # Auth::new will reap init values from NMIS::config
+my $AU = Auth->new(conf => $C);
 
 if ($AU->Require) {
 	exit 0 unless $AU->loginout(type=>$Q->{auth_type},username=>$Q->{auth_username},
 					password=>$Q->{auth_password},headeropts=>$headeropts) ;
 }
-
+else
+{
+	# that's the command line/debugger scenario, where we assume a full admin
+	$AU->SetUser("nmis");
+}
 # check for remote request
 if ($Q->{server} ne "") { exit if requestServer(headeropts=>$headeropts); }
 
@@ -76,7 +78,6 @@ my $formid = $Q->{table} ? "nmis$Q->{table}" : "nmisTable";
 # this cgi script defaults to widget mode ON
 my $widget = getbool($Q->{widget},"invert")? "false" : "true";
 my $wantwidget = $widget eq "true";
-
 
 #======================================================================
 
@@ -104,7 +105,9 @@ exit;
 #==================================================================
 #
 
-sub loadReqTable {
+# loads the file with the actual values
+sub loadReqTable
+{
 	my %args = @_;
 	my $table = $args{table};
 	my $msg = $args{msg};
@@ -125,25 +128,6 @@ sub loadReqTable {
 	return $T;
 }
 
-sub loadCfgTable {
-	my %args = @_;
-	my $table = $args{table};
-
-	# Set the Environment VAR to tell the EVAL'd program who the user is.
-	$ENV{'NMIS_USER'} = $AU->{user};
-
-	my $tabCfg = loadGenericTable("Table-$table");
-	my %Cfg = %{$tabCfg};
-
-	if (!($Cfg{$table})) {
-		print Tr(td({class=>'error'},"Configuration of table $table does not exists"));
-		return;
-	}
-
-	return $Cfg{$table};
-}
-
-#
 sub menuTable{
 
 	my $table = $Q->{table};
@@ -169,7 +153,8 @@ EOF
 	$T = loadReqTable(table=>$table); # load requested table
 
 	my $CT;
-	return if (!($CT = loadCfgTable(table=>$table))); # load configuration of table
+	# load configuration of table
+	return if (!($CT = loadCfgTable(table=>$table, user => $AU->{user})));
 
 	print start_table;
 
@@ -214,9 +199,10 @@ EOF
 
 		if ($AU->CheckAccess("Table_${table}_rw","check")) {
 			$bt = '&nbsp;'
-					.	a({href=>"$url&act=config_table_edit&key=$safekey&widget=$widget"},
-							'edit')
-					. '&nbsp;'
+					# polling-policy: not editable, only add and delete
+					. ($table eq "Polling-Policy"? '' :
+						 (a({href=>"$url&act=config_table_edit&key=$safekey&widget=$widget"},
+								'edit') . '&nbsp;'))
 					. a({href=>"$url&act=config_table_delete&key=$safekey&widget=$widget"},
 							'delete');
 			# if looking at the users table AND lockout feature is enabled, offer a failure count reset
@@ -257,7 +243,7 @@ sub viewTable {
 	my $T;
 	return if (!($T = loadReqTable(table=>$table))); # load requested table
 
-	my $CT = loadCfgTable(table=>$table); # load table configuration
+	my $CT = loadCfgTable(table=>$table, user => $AU->{user}); # load table configuration
 	# not delete -> we assume view
 	my $action= $Q->{act} =~ /delete/? "config_table_dodelete": "config_table_menu";
 
@@ -285,6 +271,25 @@ sub viewTable {
 
 	if ($Q->{act} =~ /delete/)
 	{
+		# Polling Policy: should not be deletable if there are nodes with this policy
+		my $forbidden;
+		if ($table eq "Polling-Policy")
+		{
+			my $LNT = loadLocalNodeTable();
+			my $problematic = scalar grep($_->{polling_policy} eq $key, values %$LNT);
+			$forbidden = "Policy \"$key\" is used by $problematic nodes, cannot be deleted!" if ($problematic);
+		}
+
+		if ($forbidden)
+		{
+			print Tr(td({class=>"Error", colspan => 2 }, $forbidden,
+									'&nbsp;', button(-name=>'button',
+																	 onclick=> '$("#cancelinput").val("true");'
+																	 . ($wantwidget? "get('$formid');" : 'submit();'),
+																	 -value=>"Ok")));
+		}
+		else
+		{
 			print Tr(td('&nbsp;'),
 							 td(button(-name=>"button",onclick => ($wantwidget? "get('$formid');" : 'submit()'),
 												 -value=>"Delete"),
@@ -294,6 +299,7 @@ sub viewTable {
 												 onclick=> '$("#cancelinput").val("true");'
 												 . ($wantwidget? "get('$formid');" : 'submit();'),
 												 -value=>"Cancel")));
+		}
 	}
 	else
 	{
@@ -326,7 +332,7 @@ sub showTable {
 	my $T;
 	return if (!($T = loadReqTable(table=>$table))); # load requested table
 
-	my $CT = loadCfgTable(table=>$table); # load table configuration
+	my $CT = loadCfgTable(table=>$table, user => $AU->{user}); # load table configuration
 
 	my $S = Sys::->new;
 	$S->init(name=>$node,snmp=>'false');
@@ -372,6 +378,9 @@ sub editTable
 	my $table = $Q->{table};
 	my $key = $Q->{key};
 
+	# polling policy: add and delete, no edit
+	return menuTable() if ($table eq "Polling-Policy" and $Q->{act} eq 'config_table_edit');
+
 	my @hash; # items of key
 
 	#start of page
@@ -383,7 +392,7 @@ sub editTable
 	my $T;
 	return if (!($T = loadReqTable(table=>$table,msg=>'false')) and $Q->{act} =~ /edit/); # load requested table
 
-	my $CT = loadCfgTable(table=>$table);
+	my $CT = loadCfgTable(table=>$table, user => $AU->{user});
 
 	my $func = ($Q->{act} eq 'config_table_add') ? 'doadd' : 'doedit';
 	my $button = ($Q->{act} eq 'config_table_add') ? 'Add' : 'Edit';
@@ -517,20 +526,26 @@ sub editTable
 	pageEnd() if (getbool($widget,"invert"));
 }
 
+# this function performs the actual modification of the files with values
+# called for both adding and editing
 sub doeditTable
 {
 	my $table = $Q->{table};
 	my $hash = $Q->{hash};
 
-	my $new_name;									# only needed for nodes table
-
 	return 1 if (getbool($Q->{cancel}));
+
+	# no editing for the Polling Policy, only add and delete
+	return 1 if ($table eq "Polling-Policy"
+							 and $Q->{act} eq "config_table_doedit");
+
+	my $new_name;									# only needed for nodes table
 
 	$AU->CheckAccess("Table_${table}_rw",'header');
 
-	my $T = loadReqTable(table=>$table,msg=>'false');
+	my $T = loadReqTable(table=>$table, msg=>'false');
 
-	my $CT = loadCfgTable(table=>$table);
+	my $CT = loadCfgTable(table=>$table, user => $AU->{user});
 	my $TAB = loadGenericTable('Tables');
 
 	# combine key from values, values separated by underscrore
@@ -543,7 +558,7 @@ sub doeditTable
 		$key = stripSpaces($key);
 	}
 
-	# test on existing key
+	# test for invalid or existing key
 	if ($Q->{act} =~ /doadd/)
 	{
 		if (exists $T->{$key}) {
@@ -561,7 +576,8 @@ sub doeditTable
 	# make room, make room! accessing a nonexistent $T->{$key} does NOT attach it to $T...
 	my $thisentry  = $T->{$key} ||= {};
 
-	my $V;
+	my $V;												# fixme: deprecated, in sql db mode only
+
 	# store new values in table structure
 	for my $ref ( @{$CT})
 	{
@@ -581,44 +597,172 @@ sub doeditTable
 			# any such into comma-sep data - but for a standalone submission that does not happen.
 			my $value = join(",", unpack("(Z*)*", stripSpaces($Q->{$item})));
 			$thisentry->{$item} = $V->{$item} = $value;
+
+			# and validate if told to
+			next if (ref($thisitem->{validate}) ne "HASH");
+
+			# supported validation mechanisms:
+			# "int" => [ min, max ], undef can be used for no min/max - rejects X < min or > max.
+			# "float" => [ min, max, above, below ] - rejects X < min or X <= above, X > max or X >= below
+			#   that's required to express 'positive float' === strictly above zero: [0 or undef,dontcare,0,dontcare]
+			# "regex" => qr//,
+			# "ip" => [ 4 or 6 or 4, 6],
+			# "resolvable" => [ 4 or 6 or 4, 6] - accepts ip of that type or hostname that resolves to that ip type
+			# "onefromlist" => [ list of accepted values ] or undef - if undef, 'value' list is used
+			#   accepts exactly one value
+			# "multifromlist" => [ list of accepted values ] or undef, like fromlist but more than one
+			#   accepts any number of values from the list, including none whatsoever!
+			# more than one rule possible but likely not very useful
+			for my $valtype (sort keys %{$thisitem->{validate}})
+			{
+				my $valprops = $thisitem->{validate}->{$valtype};
+
+				if ($valtype eq "int" or $valtype eq "float")
+				{
+					return validation_abort($item, "'$value' is not an integer!")
+							if ($valtype eq "int" and int($value) ne $value);
+					return validation_abort($item, "'$value' is not a floating point number!")
+							# integer or full ieee floating point with optional exponent notation
+							if ($valtype eq "float" and $value !~ /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/);
+
+					my ($min,$max,$above,$below) = ref($valprops) eq "ARRAY"? @{$valprops} : (undef,undef,undef,undef);
+					return validation_abort($item, "$value below minimum $min!")
+							if (defined($min) and $value < $min);
+					return validation_abort($item,"$value above maximum $max!")
+							if (defined($max) and $value > $max);
+
+					# integers don't subdivide infinitely precisely so above and below not needed
+					if ($valtype eq "float")
+					{
+						return validation_abort($item, "$value is not above $above!")
+								if (defined($above) and $value <= $above);
+
+						return validation_abort($item, "$value is not below $below!")
+								if (defined($below) and $value >= $below);
+					}
+				}
+				elsif ($valtype eq "regex")
+				{
+					my $expected = ref($valprops) eq "Regexp"? $valprops : qr//; # fallback will match anything
+					return validation_abort($item, "'$value' didn't match regular expression!")
+							if ($value !~ $expected);
+				}
+				elsif ($valtype eq "ip")
+				{
+					my @ipversions = ref($valprops) eq "ARRAY"? @$valprops : (4,6);
+
+					my $ipobj = Net::IP->new($value);
+					return validation_abort($item, "'$value' is not a valid IP address!")
+							if (!$ipobj);
+
+					return validation_abort($item, "'$value' is IP address of the wrong type!")
+							if (($ipobj->version == 6 and !grep($_ == 6, @ipversions))
+									or $ipobj->version == 4 and !grep($_ == 4, @ipversions));
+				}
+				elsif ($valtype eq "resolvable")
+				{
+					return validation_abort($item, "'$value' is not a resolvable name or IP address!")
+							if (!$value);
+
+					my @ipversions = ref($valprops) eq "ARRAY"? @$valprops : (4,6);
+
+					my $alreadyip = Net::IP->new($value);
+					if ($alreadyip)
+					{
+						return validation_abort($item, "'$value' is IP address of the wrong type!")
+								if (!grep($_ == $alreadyip->version, @ipversions));
+						# otherwise, we're happy...
+					}
+					else
+					{
+						my @addresses = NMIS::resolve_dns_name($value);
+						return validation_abort($item, "DNS failed to resolve '$value'!")
+								if (!@addresses);
+
+						my @addr_objs = map { Net::IP->new($_) } (@addresses);
+						my $goodones;
+						for my $type (4,6)
+						{
+							$goodones += grep($_->version == $type, @addr_objs) if (grep($_ == $type, @ipversions));
+						}
+						return validation_abort($item,
+																		"'$value' does not resolve to an IP address of the right type!")
+								if (!$goodones);
+					}
+				}
+				elsif ($valtype eq "onefromlist" or $valtype eq "multifromlist")
+				{
+					# either explicit list of acceptables, or the 'value' config item
+					my @acceptable = ref($valprops) eq "ARRAY"? @$valprops :
+							ref($thisitem->{value}) eq "ARRAY"? @{$thisitem->{value}}: ();
+					return validation_abort($item, "no validation choices configured!")
+							if (!@acceptable);
+
+					# for multifromlist assume that value is now comma-separated. *sigh*
+					# for onefromlist values with colon are utterly unspecial *double sigh*
+					my @mustcheckthese = ($valtype eq "multifromlist")? split(/,/, $value) : $value;
+					for my $oneofmany (@mustcheckthese)
+					{
+						return validation_abort($item, "'$oneofmany' is not in list of acceptable values!")
+								if (!List::Util::any { $oneofmany eq $_ } (@acceptable));
+					}
+				}
+				else
+				{
+					return validation_abort($item, "unknown validation type \"$valtype\"");
+				}
+			}
 		}
 	}
 
-	# some sanity checks BEFORE writing the data out
-	if ($table eq 'Nodes')
+	# nodes requires special handling, extra sanity checks, and dealing with rename
+ 	if ($table eq 'Nodes')
 	{
-		# check host address
-		if (!$thisentry->{host})
-		{
-			print header($headeropts);
-			print Tr(td({class=>'error'} , "Field \'host\' must be filled in table $table"));
-			return 0;
-		}
-
-		### test the DNS for DNS names, if no IP returned, error exit
-		# fixme: ipv6 not supported yet
-		if ( $thisentry->{host} !~ /\d+\.\d+\.\d+\.\d+/ )
-		{
-			my $address = resolveDNStoAddr($thisentry->{host});
-			if ( $address !~ /\d+\.\d+\.\d+\.\d+/ or !$address ) {
-				print header($headeropts);
-				print Tr(td({class=>'error'} , escapeHTML("ERROR, cannot resolve IP address \'$thisentry->{host}\'")
-										."<br>". "Please correct this item in table $table"));
-				return 0;
-			}
-		}
-
 		# ensure a uuid is present
-		$thisentry->{uuid} ||= getUUID($key);
+		$thisentry->{uuid} ||= NMIS::UUID::getUUID($key);
 		$V->{uuid} ||= $thisentry->{uuid};
 
 		# keep the new_name from being written to the config file
 		$new_name = $thisentry->{new_name};
 		delete $thisentry->{new_name};
+
+		# renaming?
+		if ($new_name && $new_name ne $thisentry->{name})
+		{
+			# this rewrites nodes.nmis twice, by necessity; backs out nodes.nmis if unsuccessful
+			my ($error,$message) = NMIS::rename_node(old => $thisentry->{name}, new => $new_name,
+																							 originator => "tables.pl.editNodeTable");
+			if ($error)
+			{
+				print header($headeropts),
+				Tr(td({class=>'error'},
+							escapeHTML("ERROR, renaming node \'$thisentry->{name}\' to \'$new_name\' failed: $message")));
+				return 0;
+			}
+			$key = $new_name;
+		}
+		# nope, just a general modification so write out the data...
+		else
+		{
+			writeTable(dir=>'conf',name=>$table, data=>$T);
+		}
+		cleanEvent($key, "tables.pl.editNodeTable");
+
+		# ...before possibly running an update on that node
+		if (getbool($Q->{update}))
+		{
+			doNodeUpdate(node=>$key);
+			return 0;
+		}
+
+		# don't let the generic code (re|over)write the nodes table again...
+		return 1;
 	}
 
+	# the non-nodes.nmis case
 	my $db = "db_".lc($table)."_sql";
-	if ( getbool($C->{$db}) ) {
+	if ( getbool($C->{$db}) )
+	{
 		my $stat;
 		$V->{index} = $key; # add this column
 		if ($Q->{act} =~ /doadd/) {
@@ -626,43 +770,28 @@ sub doeditTable
 		} else {
 			$stat = DBfunc::->update(table=>$table,data=>$V,index=>$key);
 		}
-		if (!$stat) {
+		if (!$stat)
+		{
 			print header({-type=>"text/html",-expires=>'now'});
 			print Tr(td({class=>'error'} , escapeHTML(DBfunc::->error())));
 			return 0;
 		}
-	} else {
+	}
+	else
+	{
 		writeTable(dir=>'conf',name=>$table, data=>$T);
 	}
-
-
-	# further special handling for nodes: rename and general update
-	if ($table eq 'Nodes')
-	{
-		# handle the renaming case
-		if ($new_name && $new_name ne $thisentry->{name})
-		{
-			my ($error,$message) = NMIS::rename_node(old => $thisentry->{name}, new => $new_name,
-																							 originator => "tables.pl.editNodeTable");
-			if ($error)
-			{
-				print header($headeropts),
-				Tr(td({class=>'error'}, escapeHTML("ERROR, renaming node \'$thisentry->{name}\' to \'$new_name\' failed: $message")));
-				return 0;
-			}
-			$key = $new_name;
-		}
-
-		cleanEvent($key, "tables.pl.editNodeTable");
-
-		if (getbool($Q->{update}))
-		{
-			doNodeUpdate(node=>$key);
-			return 0;
-		}
-	}
-
 	return 1;
+}
+
+# print (negative) html response
+sub validation_abort
+{
+	my ($item, $message) = @_;
+
+	print header($headeropts),
+	Tr(td({class=>'error'} , escapeHTML("'$item' failed to validate: $message")));
+	return undef;
 }
 
 sub dodeleteTable {

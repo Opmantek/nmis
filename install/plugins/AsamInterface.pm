@@ -8,6 +8,8 @@ use strict;
 use NMIS;												# lnt
 use func;												# for loading extra tables
 use snmp 1.1.0;									# for snmp-related access
+use Net::SNMP qw(oid_lex_sort);
+use Data::Dumper;
 
 sub update_plugin
 {
@@ -30,13 +32,32 @@ sub update_plugin
 	logMsg("ERROR $errmsg") if $errmsg;
 	$override ||= {};
 
+	my $changesweremade = 0;
+
+	my ($session, $error) = Net::SNMP->session(
+                           #-hostname      => $NC->{node}{host},
+                           #-port          => $NC->{node}{port},
+                           #-version       => $NC->{node}{version},
+                           #-community     => $NC->{node}{community},   # v1/v2c
+
+                           -hostname      => $LNT->{$node}{host},
+                           -port          => $LNT->{$node}{port},
+                           -version       => $LNT->{$node}{version},
+                           -community     => $LNT->{$node}{community},   # v1/v2c
+                        );	
+
+	if ( $error ) {
+		dbg("ERROR with SNMP on $node: ". $error);
+		return ($changesweremade,undef);
+	}
+
 	# Get the SNMP Session going.
-	my $snmp = snmp->new(name => $node);
-	return (2,"Could not open SNMP session to node $node: ".$snmp->error)
-			if (!$snmp->open(config => $NC->{node}, host_addr => $NI->{system}->{host_addr}));
-	
-	return (2, "Could not retrieve SNMP vars from node $node: ".$snmp->error)
-			if (!$snmp->testsession);
+	#my $snmp = snmp->new(name => $node);
+	#return (2,"Could not open SNMP session to node $node: ".$snmp->error)
+	#		if (!$snmp->open(config => $NC->{node}, host_addr => $NI->{system}->{host_addr}));
+	#
+	#return (2, "Could not retrieve SNMP vars from node $node: ".$snmp->error)
+	#		if (!$snmp->testsession);
 	
 	# remove any old redundant useless and otherwise annoying entries.
 	delete $S->{info}{interface};
@@ -67,6 +88,26 @@ sub update_plugin
 	my $asamVersion41 = qr/OSWPAA41|L6GPAA41|OSWPAA37|L6GPAA37|OSWPRA41/;
 	my $asamVersion42 = qr/OSWPAA42|L6GPAA42|OSWPAA46/;
 	my $asamVersion43 = qr/OSWPRA43|OSWPAN43/;
+
+	# we have been told index 17 of the eqptHolder is the ASAM Model	
+	my $asamModel = $NI->{eqptHolder}{17}{eqptHolderPlannedType};
+
+	if ( $asamModel eq "NFXS-A" ) {
+		$asamModel = "7302 ($asamModel)";
+	}
+	elsif ( $asamModel eq "NFXS-B" ) {
+		$asamModel = "7330-FD ($asamModel)";
+	}
+	elsif ( $asamModel eq "ARAM-D" ) {
+		$asamModel = "ARAM-D ($asamModel)";
+	}
+	elsif ( $asamModel eq "ARAM-E" ) {
+		$asamModel = "ARAM-E ($asamModel)";
+	}
+
+	$NI->{system}{asamModel} = $asamModel;
+	$V->{system}{"asamModel_value"} = $asamModel;
+	$V->{system}{"asamModel_title"} = "ASAM Model";
 	
 	my $rack_count = 1;
 	my $shelf_count = 1;
@@ -93,7 +134,7 @@ sub update_plugin
 		# How to identify it is an ARAM-D?
 		#"For ARAM-D with extensions "
 		$version = 4.1;
-		my ($indexes,$rack_count,$shelf_count) = build_41_interface_indexes(NI => $NI);
+		my ($indexes,$rack_count,$shelf_count) = build_interface_indexes(NI => $NI);
 		@ifIndexNum = @{$indexes};
 		
 	}
@@ -101,13 +142,13 @@ sub update_plugin
 	elsif( $asamSoftwareVersion =~ /$asamVersion42/ )
 	{
 		$version = 4.2;
-		my $indexes = build_42_interface_indexes(NI => $NI);
+		my $indexes = build_interface_indexes(NI => $NI);
 		@ifIndexNum = @{$indexes};
 	}
 	elsif( $asamSoftwareVersion =~ /$asamVersion43/ )
 	{
 		$version = 4.3;
-		my ($indexes,$rack_count,$shelf_count) = build_41_interface_indexes(NI => $NI);
+		my ($indexes,$rack_count,$shelf_count) = build_interface_indexes(NI => $NI);
 		@ifIndexNum = @{$indexes};
 	}
 	else {
@@ -118,27 +159,51 @@ sub update_plugin
 	
 	my $intfTotal = 0;
 	my $intfCollect = 0; # reset counters
-
+		
 	foreach my $index (@ifIndexNum) {
 		$intfTotal++;				
-		my $ifDescr = getIfDescr(prefix => "ATM", version => $version, ifIndex => $index);
+		my $ifDescr = getIfDescr(prefix => "ATM", version => $version, ifIndex => $index, asamModel => $asamModel);
 		my $Description = getDescription(version => $version, ifIndex => $index);
 				
 		my $offset = 12288;
 		if ( $version eq "4.2" )  {
 			$offset = 6291456;
 		}
+
+		my $offsetIndex = $index - $offset;
 		
 		#asamIfExtCustomerId
 		my $prefix = "1.3.6.1.4.1.637.61.1.6.5.1.1";
-		my $offsetIndex = $index - $offset;
 		my $oid = "$prefix.$offsetIndex";
-		my $customerid = $snmp->get($oid);
-		
-		dbg("SNMP $node $ifDescr $Description, index=$index, offset=$offset, offsetIndex=$offsetIndex, customerid=$customerid->{$oid}");
-		if ( $customerid->{$oid} ne "" and $customerid->{$oid} !~ /SNMP ERROR/ ) {
-			$Description = $customerid->{$oid};
+
+		if ( defined $NI->{Customer_ID} and defined $NI->{Customer_ID}{$offsetIndex} ) {
+			$Description = $NI->{Customer_ID}{$offsetIndex}{asamIfExtCustomerId};
+			dbg("Customer_ID $node $ifDescr $Description");
 		}
+		else {
+			#my $customerid = $snmp->get($oid);		
+			my $customerid;
+			if ( $session ) {
+				#print "DEBUG: running the SNMP NOW\n";
+				my @oids = ( $oid );			
+				$customerid = $session->get_request(
+					-varbindlist => \@oids
+				);
+	
+				if ( $session->error() ) {
+					dbg("ERROR with SNMP on $node: ". $session->error());
+				}
+			}
+			else {
+				dbg("ERROR some session problem with SNMP on $node");
+			}
+			
+			if ( $customerid->{$oid} ne "" and $customerid->{$oid} !~ /SNMP ERROR/ ) {
+				$Description = $customerid->{$oid};
+			}
+			dbg("SNMP $node $ifDescr $Description, index=$index, offset=$offset, offsetIndex=$offsetIndex, customerid=$Description");
+		}
+		
 		
 		$S->{info}{interface}{$index} = {
 			'Description' => $Description,
@@ -338,22 +403,21 @@ sub getRackShelfMatrix {
 	elsif ( $version eq "4.2" ) {	
 		my $slot = 0;
 		my @indexes;
-		foreach my $eqpt (sort {$a <=> $b} keys %{$eqptHolder} ) {
-			dbg("$eqpt, eqptHolderPlannedType=$eqptHolder->{$eqpt}{eqptHolderPlannedType}");
-			if ( $eqptHolder->{$eqpt}{eqptHolderPlannedType} =~ /$rackMatch/ ) {
-				++$slot;
-			}
-		}
 		#foreach my $eqpt (sort {$a <=> $b} keys %{$eqptHolder} ) {
-		#	dbg("$eqpt = eqptPortMapping=$eqptHolder->{$eqpt}{eqptPortMappingLSMSlot}");
-		#	if ( $eqptHolder->{$eqpt}{eqptPortMappingLSMSlot} != 65535 ) {
+		#	dbg("$eqpt, eqptHolderPlannedType=$eqptHolder->{$eqpt}{eqptHolderPlannedType}");
+		#	if ( $eqptHolder->{$eqpt}{eqptHolderPlannedType} =~ /$rackMatch/ ) {
 		#		++$slot;
-		#		push(@indexes,$eqptHolder->{$eqpt}{eqptPortMappingLSMSlot});
 		#	}
 		#}
+		foreach my $eqpt (sort {$a <=> $b} keys %{$eqptHolder} ) {
+			dbg("$eqpt = eqptPortMapping=$eqptHolder->{$eqpt}{eqptPortMappingLSMSlot}");
+			if ( $eqptHolder->{$eqpt}{eqptPortMappingLSMSlot} != 65535 ) {
+				++$slot;
+				push(@indexes,$eqptHolder->{$eqpt}{eqptPortMappingLSMSlot});
+			}
+		}
 		$config{slot}{slots} = $slot;
-		# not used
-		#$config{slot}{indexes} = \@indexes;
+		$config{slot}{indexes} = \@indexes;
 	}
 	
 	# print Dumper(\%config) if $debug;
@@ -366,6 +430,7 @@ sub getIfDescr {
 	
 	my $oid_value 		= $args{ifIndex};	
 	my $prefix 		= $args{prefix};	
+	my $asamModel 		= $args{asamModel};	
 	
 	if ( $args{version} eq "4.1" or $args{version} eq "4.3" ) {
 		my $rack_mask 		= 0x70000000;
@@ -384,6 +449,8 @@ sub getIfDescr {
 		$slot = $slot - 2;
 		++$circuit;	
 		
+		$slot = asamSlotCorrection($slot,$asamModel);
+
 		return "$prefix-$rack-$shelf-$slot-$circuit";
 	}
 	else {
@@ -402,10 +469,34 @@ sub getIfDescr {
 		++$circuit;	
 		
 		$prefix = "XDSL" if $level == 16;
+		
+		$slot = asamSlotCorrection($slot,$asamModel);
 
 		return "$prefix-1-1-$slot-$circuit";		
 	}
 }
+
+sub asamSlotCorrection {
+	my $slot = shift;
+	my $asamModel = shift;
+	
+	if ( $asamModel =~ /7302/ and $slot >= 9 ) {
+		$slot = $slot + 1;
+	}
+	elsif ( $asamModel =~ /ARAM-D/ ) {
+		$slot = $slot + 3
+	}
+	elsif ( $asamModel =~ /ARAM-E/ and $slot < 9 ) {
+		$slot = $slot + 1
+	}
+	elsif ( $asamModel =~ /ARAM-E/ and $slot >= 9 ) {
+		$slot = $slot + 3
+	}
+	elsif ( $asamModel =~ /7330-FD/ ) {
+		$slot = $slot + 3
+	}
+	return $slot;
+} 
 
 sub getDescription {
 	my %args = @_;
@@ -523,18 +614,22 @@ sub build_42_interface_indexes {
 	my $level = 3;
 	
 	#Look at the eqptHolderPlannedType data to see what is planned for this device.
+	#if ( exists $NI->{eqptHolder} ) {
+	#	$systemConfig = getRackShelfMatrix("4.2",$NI->{eqptHolder});
+	#}
 	if ( exists $NI->{eqptHolder} ) {
-		$systemConfig = getRackShelfMatrix("4.2",$NI->{eqptHolder});
+		$systemConfig = getRackShelfMatrix("4.2",$NI->{eqptPortMapping});
 	}
 	
 	my $slot_count = $systemConfig->{slot}{slots};
 	# correct the slot_count
 	#my $slot_limit = ( $slot_count * 2 ) + 2;
-	#my $slot_limit = $slot_count + 1;
-	my $slot_limit = $slot_count;
+	my $slot_limit = $slot_count + 1;
+	#my $slot_limit = $slot_count;
 	
-	dbg("DEBUG slot_count=$slot_count slot_limit=$slot_limit");
-	
+	#dbg("DEBUG slot_count=$slot_count slot_limit=$slot_limit");
+	dbg("DEBUG slot_count=$slot_count slot_limit=$slot_limit indexes=@{$systemConfig->{slot}{indexes}}");
+
 	#Slot count x 2 + 3? Or + 2
 	
 	my @slots = (2..$slot_limit);
@@ -548,6 +643,28 @@ sub build_42_interface_indexes {
 			push( @interfaces, $index );
 		}		
 	}
+	return \@interfaces;
+}
+
+sub build_interface_indexes {
+	my %args = @_;
+	my $NI = $args{NI};
+	my $systemConfig;
+
+	my $level = 3;
+	
+	my @interfaces = ();
+	
+	if ( exists $NI->{ifTable} ) {
+		foreach my $ifIndex (oid_lex_sort(keys(%{$NI->{ifTable}}))) {
+			if ( $NI->{ifTable}{$ifIndex}{ifDescr} eq "atm Interface" ) {
+				push( @interfaces, $ifIndex );
+			}
+		}
+	}
+	
+	dbg("DEBUG indexes=@interfaces");
+
 	return \@interfaces;
 }
 

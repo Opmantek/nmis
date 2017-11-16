@@ -14,7 +14,7 @@ IMPORTS
 		FROM SNMPv2-CONF;
      
 opmantek MODULE-IDENTITY
-	LAST-UPDATED "201503160000Z"
+	LAST-UPDATED "201702100000Z"
 	ORGANIZATION "Opmantek Ltd"
 	CONTACT-INFO
 		"Opmantek Ltd
@@ -30,6 +30,20 @@ opmantek MODULE-IDENTITY
 		This module defines the Opmantek SNMP MIB root
 		and its primary subtrees.
 		"
+
+ -- Revision log, in reverse chronological order
+
+	REVISION      "201705080000Z"
+	DESCRIPTION
+		"Added three new object to the trap omkNodeGroup, omkNodeRole, omkNodeCountry and omkNodeProperty."
+
+	REVISION      "201702100000Z"
+	DESCRIPTION
+		"Added missing values to omkEvent, omkProbableCause and omkAlarmId."
+
+	REVISION      "201702080000Z"
+	DESCRIPTION
+		"Added two new objects to the trap, omkProbableCause and omkAlarmId."
 
 	REVISION      "201503160000Z"
 	DESCRIPTION
@@ -49,7 +63,7 @@ omkObjects OBJECT-IDENTITY
 	::= { opmantek 2 }
 
 omkEvent NOTIFICATION-TYPE
-	OBJECTS     { omkId, omkTime, omkDate, omkNode, omkHost, omkEvent, omkElement, omkState, omkStateful, omkDetails, omkType, omkPriority, omkLevel }
+	OBJECTS     { omkId, omkTime, omkDate, omkNode, omkHost, omkEventName, omkElement, omkState, omkStateful, omkDetails, omkType, omkPriority, omkLevel, omkProbableCause, omkAlarmId, omkNodeGroup, omkNodeRole, omkNodeCountry, omkNodeProperty }
 	STATUS      current
 	DESCRIPTION 
 		"The Opmantek Event coming from opEvents with rich data about state and priority."
@@ -62,7 +76,6 @@ nmisEvent NOTIFICATION-TYPE
 		"The NMIS Event with standard event properties."
 	::= { omkNotifications 2 }
 
-
 omkEventGroup OBJECT-GROUP
 	OBJECTS {
 		omkId,
@@ -70,14 +83,20 @@ omkEventGroup OBJECT-GROUP
 		omkDate,
 		omkNode,
 		omkHost,
-		omkEvent,
+		omkEventName,
 		omkElement,
 		omkState,
 		omkStateful,
 		omkDetails,
 		omkType,
 		omkPriority,
-		omkLevel
+		omkLevel,
+		omkProbableCause,
+		omkAlarmId,
+		omkNodeGroup,
+		omkNodeRole,
+		omkNodeCountry,
+		omkNodeProperty
 	} 
 	STATUS current
 	DESCRIPTION
@@ -124,7 +143,7 @@ omkHost OBJECT-TYPE
 		"The IP address or hostname"
 	::= { omkEventGroup 5 }
 
-omkEvent OBJECT-TYPE
+omkEventName OBJECT-TYPE
 	SYNTAX      DisplayString
 	MAX-ACCESS  read-only
 	STATUS      current
@@ -188,7 +207,53 @@ omkLevel OBJECT-TYPE
 		"NMIS Event Level"
 	::= { omkEventGroup 13 }
 
-    
+omkProbableCause OBJECT-TYPE
+	SYNTAX      DisplayString
+	MAX-ACCESS  read-only
+	STATUS      current
+	DESCRIPTION 
+		"The Probable Cause carried from other possible sources"
+	::= { omkEventGroup 14 }
+
+omkAlarmId OBJECT-TYPE
+	SYNTAX      INTEGER
+	MAX-ACCESS  read-only
+	STATUS      current
+	DESCRIPTION 
+		"The AlarmID carried from other possible sources"
+	::= { omkEventGroup 15 }    
+
+omkNodeGroup OBJECT-TYPE
+	SYNTAX      DisplayString
+	MAX-ACCESS  read-only
+	STATUS      current
+	DESCRIPTION 
+		"The name of the group for the node related to this event"
+	::= { omkEventGroup 16 }
+
+omkNodeRole OBJECT-TYPE
+	SYNTAX      DisplayString
+	MAX-ACCESS  read-only
+	STATUS      current
+	DESCRIPTION 
+		"The name of the role for the node related to this event"
+	::= { omkEventGroup 17 }
+
+omkNodeCountry OBJECT-TYPE
+	SYNTAX      DisplayString
+	MAX-ACCESS  read-only
+	STATUS      current
+	DESCRIPTION 
+		"The name of the country for the node related to this event"
+	::= { omkEventGroup 18 }
+
+omkNodeProperty OBJECT-TYPE
+	SYNTAX      DisplayString
+	MAX-ACCESS  read-only
+	STATUS      current
+	DESCRIPTION 
+		"The name of the property for the node related to this event"
+	::= { omkEventGroup 19 }
 
 nmisEventGroup OBJECT-GROUP
 	OBJECTS {

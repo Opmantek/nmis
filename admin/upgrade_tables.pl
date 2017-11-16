@@ -29,7 +29,7 @@
 # *****************************************************************************
 #
 # this helper upgrades table files where safe to do so
-our $VERSION="8.6.1G";
+our $VERSION="8.6.2a";
 
 use strict;
 use Digest::MD5;								# good enough
@@ -181,6 +181,7 @@ __DATA__
 Table-Access.nmis 40fa00017376ca51
 Table-BusinessServices.nmis 539adae4fed03ff2
 Table-CircuitGroups.nmis 9e00f871315bd959 545ea59abb4473ad
+Table-Config.nmis 3d825194acdc9597
 Table-Contacts.nmis 50894801c64f3628 3039d313daf0209d
 Table-Customers.nmis 6503aea40218241e
 Table-Enterprise.nmis b954e3ca75233bce
@@ -189,7 +190,8 @@ Table-Events.nmis 7826f94d352fecf8
 Table-Links.nmis 485da1859e3cc036 3f6a43471d7e4cfe
 Table-Locations.nmis 2d63c7fa7954e92a bd24e107f8158818 2e2e263c0c08d268
 Table-Logs.nmis e70cc904a9d923e5
-Table-Nodes.nmis ef34b637d02ba140 32815befe46ad8e6 c536bfe56a073e41 703420fa55f06eb6 5b144d5f598eb815 013e95cef5802716 80d4c960b5570f70 a8c9b78dd1ad3910
+Table-Nodes.nmis 948b836801802bf9 32815befe46ad8e6 c536bfe56a073e41 703420fa55f06eb6 5b144d5f598eb815 013e95cef5802716 80d4c960b5570f70 a8c9b78dd1ad3910 ef34b637d02ba140 7f1a618619af76f7
+Table-Polling-Policy.nmis 7abb03f496c1943f
 Table-Portal.nmis f092a05f0f7a2bbb
 Table-PrivMap.nmis dccc46beb3506fa8
 Table-ServiceStatus.nmis be3cd0dfc5c22efa
@@ -199,4 +201,4 @@ Table-Toolset.nmis c3551c5e8117e00d
 Table-Users.nmis e2d4055294ae58e2
 Table-cmdbModels.nmis ea9eceefcf31c9ed
 Table-ifTypes.nmis aed6f62c2aa89d8a
-Tables.nmis 07f47ede46bd4779 91d30cf4bfaf25aa 33c5300087f34abb 8d44d78f24b62c7c
+Tables.nmis fcd319f68f81fee2 91d30cf4bfaf25aa 33c5300087f34abb 07f47ede46bd4779 8d44d78f24b62c7c

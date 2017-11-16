@@ -3,39 +3,42 @@
 ## $Id: outages.pl,v 8.5 2012/04/28 00:59:36 keiths Exp $
 #
 #  Copyright (C) Opmantek Limited (www.opmantek.com)
-#  
+#
 #  ALL CODE MODIFICATIONS MUST BE SENT TO CODE@OPMANTEK.COM
-#  
+#
 #  This file is part of Network Management Information System (“NMIS”).
-#  
+#
 #  NMIS is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
 #  the Free Software Foundation, either version 3 of the License, or
 #  (at your option) any later version.
-#  
+#
 #  NMIS is distributed in the hope that it will be useful,
 #  but WITHOUT ANY WARRANTY; without even the implied warranty of
 #  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #  GNU General Public License for more details.
-#  
+#
 #  You should have received a copy of the GNU General Public License
-#  along with NMIS (most likely in a file named LICENSE).  
+#  along with NMIS (most likely in a file named LICENSE).
 #  If not, see <http://www.gnu.org/licenses/>
-#  
+#
 #  For further information on NMIS or for a license other than GPL please see
-#  www.opmantek.com or email contact@opmantek.com 
-#  
+#  www.opmantek.com or email contact@opmantek.com
+#
 #  User group details:
 #  http://support.opmantek.com/users/
-#  
+#
 # *****************************************************************************
 # Auto configure to the <nmis-base>/lib
 use FindBin;
 use lib "$FindBin::Bin/../lib";
 
-# 
+#
 use strict;
 use Time::ParseDate;
+use JSON::XS;
+use POSIX;
+
 use NMIS;
 use Sys;
 use func;
@@ -90,20 +93,27 @@ exit;
 
 #===================
 
-sub viewOutage {
-
+sub viewOutage
+{
 	my @out;
 	my $node = $Q->{node};
-	
+
 	my $title = $node? "Outages for $node" : "List of Outages";
 
 	my $time = time();
 
 	print header($headeropts);
 	pageStartJscript(title => $title, refresh => 86400) if (!$wantwidget);
-	
-	my $OT = loadOutageTable();
+
 	my $NT = loadNodeTable();
+	my $res = NMIS::find_outages(); # attention: cannot filter by affected node
+	if (!$res->{success})
+	{
+		$Q->{error} = "Cannot find outages: $res->{error}";
+		return;
+	}
+	my @outages = @{$res->{outages}};
+
 
 	my $S = Sys::->new;
 	$S->init(name=>$node,snmp=>'false');
@@ -114,22 +124,14 @@ sub viewOutage {
 			. hidden(-override => 1, -name => "act", -value => "outage_table_doadd")
 			. hidden(-override => 1, -name => "widget", -value => $widget);
 
-	print createHrButtons(node=>$node, system=>$S, refresh=>$Q->{refresh},widget=>$widget, conf => $Q->{conf}, AU => $AU);
+	# doesn't make sense to run the bar creator if it can't create any output anyway...
+	print createHrButtons(node=>$node, system=>$S, refresh=>$Q->{refresh},widget=>$widget, conf => $Q->{conf}, AU => $AU)
+			if ($node);
 
 	print start_table;
 
 	if ($AU->CheckAccess("Table_Outages_rw",'check')) {
 
-		print Tr(td({class=>'header',colspan=>'6'},'Add Outage'));
-	
-		print Tr(
-			td({class=>'header',align=>'center'},'Node'),
-			td({class=>'header',align=>'center'},'Start'),
-			td({class=>'header',align=>'center'},'End'),
-			td({class=>'header',align=>'center'},'Change'),
-			td({class=>'header',align=>'center',colspan=>'2'},'Action')
-			);
-	
 		my $start = $time+300;
 		my $end = $time+3600;
 		my $change = 'ticket #';
@@ -138,27 +140,50 @@ sub viewOutage {
 			$end = $Q->{end};
 			$change = $Q->{change};
 		}
+
 		my @nodes = grep { $AU->InGroup($NT->{$_}{group}) } sort {lc $a cmp lc $b} keys %{$NT};
 		my @nd = split(/,/,$node);
+
+		print Tr(td({class=>'header',colspan=>'3'},'Add Planned Outage'));
 		print Tr(
-			td({class=>'info'},
-				scrolling_list(-name=>'node',-multiple=>'true',-size=>'12',override=>'1',-values=>\@nodes,-default=>\@nd) ),
-			td({class=>'info'},
+			td({class=>'header',align=>'left'},'Planned Outage Start'),
+			td({class=>'info',colspan=>'2'},
 				textfield(-name=>'start',-id=>'id_start',-style=>'background-color:yellow;width:100%;',override=>'1',
-					-value=>returnDateStamp($start)),div({-id=>'calendar-start'}) ),
-			td({class=>'info'},
+					-value=>returnDateStamp($start)),div({-id=>'calendar-start'}) )
+			);
+
+		print Tr(
+			td({class=>'header',align=>'left'},'Planned Outage End'),
+			td({class=>'info',colspan=>'2'},
 				textfield(-name=>'end',-id=>'id_end',-style=>'background-color:yellow;width:100%;',override=>'1',
-					-value=>returnDateStamp($end)),div({-id=>'calendar-end'}) ),
-			td({class=>'info'},
-				textfield(-name=>'change',-style=>'background-color:yellow;width:200px;',override=>'1',-value=>$change)),
-			td({class=>'info',colspan=>'2',align=>'center'},
+					-value=>returnDateStamp($end)),div({-id=>'calendar-end'}) )
+			);
+
+		print Tr(
+			td({class=>'header',align=>'left'},'Related Change Details'),
+			td({class=>'info',colspan=>'2'},
+				textfield(-name=>'change',-style=>'background-color:yellow;width:200px;',override=>'1',-value=>$change))
+			);
+
+		print Tr(
+			td({class=>'header',align=>'left'},'Select Node or Nodes'),
+			td({class=>'info',colspan=>'2'},
+				scrolling_list(-name=>'node',-multiple=>'true',-size=>'12',override=>'1',-values=>\@nodes,-default=>\@nd) )
+			);
+
+		print Tr(
+			td({class=>'header',align=>'left'},'Action'),
+			td({class=>'info',align=>'center',colspan=>'2'},
 				button(-name=>'button',-onclick=> ($wantwidget? "get('nmisOutages');" : "submit()"),
 							 -value=>"Add"))
 			);
+
 		if ($Q->{error} ne '') {
-			print Tr(td({class=>'error',colspan=>'6'},$Q->{error}));
+			print Tr(td({class=>'error',colspan=>'3'},$Q->{error}));
 		}
 	}
+
+	print Tr(td({class=>'info',colspan=>'2'},'&nbsp;'));
 
 	#====
 
@@ -166,40 +191,62 @@ sub viewOutage {
 	print Tr(td({class=>'header',colspan=>'6'},$hd));
 
 	push @out, Tr(
-		td({class=>'header',align=>'center'},'Node'),
+		td({class=>'header',align=>'center'},'Node Selector'),
 		td({class=>'header',align=>'center'},'Start'),
 		td({class=>'header',align=>'center'},'End'),
 		td({class=>'header',align=>'center'},'Change'),
 		td({class=>'header',align=>'center'},'Status'),
 		td({class=>'header',align=>'center'},'Action')
-		);
-	foreach my $ot (sortall($OT,'start','rev')) {
-		next unless $AU->InGroup($NT->{$OT->{$ot}{node}}{group});
-		next if $Q->{node} ne '' and $node !~ /$OT->{$ot}{node}/;
+			);
 
-		my $outage = 'closed';
-		my $color = "#FFFFFF";
-		if ($OT->{$ot}{start} <= $time and $OT->{$ot}{end} >= $time) {
-			$outage = 'current';
-			$color = "#00FF00";
-		} elsif ($OT->{$ot}{start} >= $time) {
-			$outage = 'pending';
-			$color = "#FFFF00";
+	for my $outage (@outages)
+	{
+
+		# no coloring/status for anything but non-recurring+current ones
+		my ($status,$color) = ($outage->{frequency},"white");
+
+		if ($outage->{frequency} eq "once")
+		{
+			if ($time >= $outage->{end})
+			{
+				$status =  'closed';
+				$color = "#FFFFFF";
+			}
+			elsif ($time < $outage->{start})
+			{
+				$status = "pending";
+			}
+			else
+			{
+				$status = 'current';
+				$color = "#00FF00";
+			}
 		}
 
+		# very rough stringification of the of the selector
+		my $visual = JSON::XS->new->encode($outage->{selector});
+
 		push @out, Tr(
-			td({class=>'info',style=>getBGColor($color)},$NT->{$OT->{$ot}{node}}{name}),
-			td({class=>'info',style=>getBGColor($color)},returnDateStamp($OT->{$ot}{start})),
-			td({class=>'info',style=>getBGColor($color)},returnDateStamp($OT->{$ot}{end})),
-			td({class=>'info',style=>getBGColor($color)},$OT->{$ot}{change}),
-			td({class=>'info',style=>getBGColor($color)},$outage),
-			td({class=>'info'},a({href=>url(-absolute=>1)."?conf=$Q->{conf}&act=outage_table_dodelete&hash=$ot&widget=$widget"},'delete'))
-			);
+			td({class=>'info',style=>getBGColor($color)}, $visual),
+
+			# one-offs have start/end in unix seconds, make them friendlier for viewing
+			td({class=>'info',style=>getBGColor($color)}, $outage->{start} =~ /^\d+(\.\d+)?$/?
+				 POSIX::strftime("%Y-%m-%dT%H:%M:%S", localtime($outage->{start})) : $outage->{start}),
+
+			td({class=>'info',style=>getBGColor($color)}, $outage->{end} =~ /^\d+(\.\d+)?$/?
+				 POSIX::strftime("%Y-%m-%dT%H:%M:%S", localtime($outage->{end})) : $outage->{end}),
+
+			td({class=>'info',style=>getBGColor($color)}, $outage->{change_id}),
+			td({class=>'info',style=>getBGColor($color)}, $status),
+			td({class=>'info'},a({href=>url(-absolute=>1)."?conf=$Q->{conf}&act=outage_table_dodelete&id=$outage->{id}&widget=$widget"},'delete'))
+				);
 	}
-	if ($#out > 0) {
+
+	if (@out)
+	{
 		print @out;
 	} else {
-		print Tr(td({class=>'info',colspan=>'5'},'No outage current',eval { return " of Node $node" if $node ne '';}));
+		print Tr(td({class=>'info',colspan=>'6'}, 'No outage current' . ($node ne ''? " of Node $node": "")));
 	}
 
 	print end_table;
@@ -245,6 +292,7 @@ sub doaddOutage {
 	$AU->CheckAccess("Table_Outages_rw",'header');
 
 	my $node = $Q->{node};
+
 	my $start = parsedate($Q->{start}); # convert to number of seconds
 	my $end = parsedate($Q->{end});
 	my $change = $Q->{change};
@@ -268,32 +316,40 @@ sub doaddOutage {
 		return;
 	}
 
-	$change =~ s/,//g; # remove comma
+	$Q->{node} = '';							# fixme: what is that for??
 
-	my ($OT,$handle) = loadTable(dir=>'conf',name=>'Outage',lock=>'true');
+	$change =~ s/,//g; # remove comma to appease brittle event log system
 
-	# process multiple node select
-	foreach my $nd ( split(/,/,$node) ) {
-		my $outageHash = "$nd-$start-$end"; # key
-		$OT->{$outageHash}{node} = $nd;
-		$OT->{$outageHash}{start} = $start;
-		$OT->{$outageHash}{end} = $end;
-		$OT->{$outageHash}{change} = $change;
-		$OT->{$outageHash}{user} = $AU->User();
+	# process multiple node selection - which arrives \0-packed if POSTed, ie. nonwidget,
+	# or comma separated in widget mode
+	my $sep = $wantwidget? qr/\s*,\s*/ : qr/\0/;
+	my @nodes = split( $sep, $node);
+
+	my $res = NMIS::update_outage(frequency => "once",
+																change_id => $change,
+																start => $start,
+																end => $end,
+																meta => { user => $AU->User },
+																selector => { node =>
+																							{ name =>
+																										(@nodes > 1? \@nodes : $nodes[0]) } }); # array only if more than one
+
+	if (!$res->{success})
+	{
+		$Q->{error} = "Failed to create outage: $res->{error}";
+		return;
 	}
-
-	writeTable(dir=>'conf',name=>'Outage',data=>$OT,handle=>$handle);
-
-	$Q->{node} = '';
 }
 
+# requires the outage id
 sub dodeleteOutage {
-
 	$AU->CheckAccess("Table_Outages_rw",'header');
 
-	outageRemove(key=>$Q->{hash});
+	$Q->{node} = '';							# fixme what is that for?
 
-
-	$Q->{node} = '';
+	my $res = NMIS::remove_outage(id => $Q->{id}, meta => { user => $AU->User } );
+	if (!$res->{success})
+	{
+		$Q->{error} = "Failed to delete outage $Q->{id}: $res->{error}";
+	}
 }
-

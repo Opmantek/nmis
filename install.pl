@@ -69,7 +69,7 @@ umask(0022);
 
 my $nmisModules;			# local modules used in our scripts
 
-die $usage if ( $ARGV[0] =~ /^-{\?|h|-help$/i );
+die $usage if ( $ARGV[0] =~ /^-(\?|h|-help)$/i );
 # let's prefer std -X flags, fall back to word=value style
 my (%options, %oldstyle);
 die $usage if (!getopts("yldt:", \%options));
@@ -121,6 +121,23 @@ for  my $line (<G>)
 }
 close G;
 logInstall("Installation of NMIS $nmisversion on host '$hostname' started at ".scalar localtime(time));
+
+# safeguard against local::lib breaking system-wide module installation for cpan'ables
+
+# if PERL5LIB was set, remove all its members from @INC or the module availabilty test will
+# look in the wrong places
+if (defined $ENV{PERL_LOCAL_LIB_ROOT})
+{
+	logInstall("clearing local::lib config items");
+	for my $dontwantpath (split(/:/,$ENV{PERL5LIB}))
+	{
+		@INC = grep($_ ne $dontwantpath, @INC); # bit inefficient but good enough
+	}
+	for my $dontwant (qw(PERL_LOCAL_LIB_ROOT PERL5LIB PERL_MM_OPT PERL_MB_OPT))
+	{
+		delete $ENV{$dontwant};
+	}
+}
 
 # there are some slight but annoying differences
 my ($osflavour,$osmajor,$osminor,$ospatch,$osiscentos);
@@ -231,8 +248,11 @@ libio-socket-ssl-perl libwww-perl libnet-smtp-ssl-perl libnet-smtps-perl
 libcrypt-unixcrypt-perl libcrypt-rijndael-perl libuuid-tiny-perl libproc-processtable-perl libdigest-sha-perl
 libnet-ldap-perl libnet-snpp-perl libdbi-perl libtime-modules-perl
 libsoap-lite-perl libauthen-simple-radius-perl libauthen-tacacsplus-perl
-libauthen-sasl-perl rrdtool librrds-perl libsys-syslog-perl libtest-deep-perl dialog libui-dialog-perl libcrypt-des-perl libdigest-hmac-perl libclone-perl
-libexcel-writer-xlsx-perl libmojolicious-perl));
+libauthen-sasl-perl rrdtool librrds-perl libsys-syslog-perl libtest-deep-perl dialog libcrypt-des-perl libdigest-hmac-perl libclone-perl
+libexcel-writer-xlsx-perl libmojolicious-perl libdatetime-perl
+libnet-ip-perl libscalar-list-utils-perl libtest-requires-perl libtest-fatal-perl libtest-number-delta-perl
+
+));
 
 	my @rhpackages = (qw(perl-core autoconf automake gcc cvs cairo cairo-devel
 pango pango-devel glib glib-devel libxml2 libxml2-devel gd gd-devel
@@ -243,9 +263,10 @@ perl-libwww-perl perl-Net-DNS perl-Digest-SHA
 perl-DBI perl-Net-SMTPS perl-Net-SMTP-SSL perl-CGI net-snmp-perl perl-Proc-ProcessTable perl-Authen-SASL
 perl-Crypt-PasswdMD5 perl-Crypt-Rijndael perl-Net-SNPP perl-Net-SNMP perl-GD rrdtool
 rrdtool-perl perl-Test-Deep dialog
-perl-Excel-Writer-XLSX
- perl-Digest-HMAC perl-Crypt-DES perl-Clone
-));
+perl-Excel-Writer-XLSX perl-Net-IP perl-DateTime
+perl-Digest-HMAC perl-Crypt-DES perl-Clone perl-ExtUtils-CBuilder
+perl-ExtUtils-ParseXS perl-ExtUtils-MakeMaker perl-Test-Fatal perl-Test-Number-Delta
+perl-Test-Requires ));
 
 	# perl-Time-modules no longer a/v in rh/centos7
 	push @rhpackages, ($osflavour eq "redhat" && $osmajor < 7)?
@@ -258,6 +279,13 @@ perl-Excel-Writer-XLSX
 		push @rhpackages, "perl-CGI";
 	}
 
+	# stretch ships with these packages
+	push @debpackages, (qw(libproc-queue-perl libstatistics-lite-perl libtime-moment-perl ))
+			if ($osflavour eq "debian" and $osmajor >= 9);
+	# stretch no longer ships with this package...
+	push @debpackages, "libui-dialog-perl"
+			if ($osflavour ne "debian" or $osmajor <= 8);
+
 	my $pkgmgr = $osflavour eq "redhat"? "YUM": ($osflavour eq "debian" or $osflavour eq "ubuntu")? "APT": undef;
 	my $pkglist = $osflavour eq "redhat"? \@rhpackages : ($osflavour eq "debian" or $osflavour eq "ubuntu")? \@debpackages: undef;
 
@@ -266,8 +294,9 @@ perl-Excel-Writer-XLSX
 
 	# curl is present in most basic redhat install
 	# wget is present on debian/ubuntu via priority:important
-	my $testres = system("curl -s -m 10 -o /dev/null https://opmantek.com/robots.txt 2>/dev/null") >> 8;
-	$testres = system("wget -q -T 10 -O /dev/null https://opmantek.com/robots.txt 2>/dev/null") >> 8
+	# however, ca-certificates may be out of date/incomplete at this time
+	my $testres = system("curl --insecure -s -m 10 -o /dev/null https://opmantek.com/robots.txt 2>/dev/null") >> 8;
+	$testres = system("wget --no-check-certificate -q -T 10 -O /dev/null https://opmantek.com/robots.txt 2>/dev/null") >> 8
 			if ($testres);
 	$can_use_web = !$testres;
 
@@ -792,8 +821,9 @@ else
 	for my $cff ("License.nmis", "Access.nmis", "Config.nmis", "BusinessServices.nmis", "ServiceStatus.nmis",
 							 "Contacts.nmis", "Enterprise.nmis", "Escalations.nmis",
 							 "ifTypes.nmis", "Links.nmis", "Locations.nmis", "Logs.nmis",
-							 "Customers.nmis", "Events.nmis",
-							 "Model-Policy.nmis", "Modules.nmis", "Nodes.nmis", "Outage.nmis", "Portal.nmis",
+							 "Customers.nmis", "Events.nmis", "Polling-Policy.nmis",
+							 "Model-Policy.nmis", "Modules.nmis", "Nodes.nmis",
+							 "Outage.nmis", "Portal.nmis",
 							 "PrivMap.nmis", "Services.nmis", "Users.nmis", "users.dat")
 	{
 		if (-f "$site/install/$cff" && !-e "$site/conf/$cff")
@@ -824,8 +854,8 @@ else
 
 		# patch config changes that affect existing entries, which update_config_defaults
 		# doesn't handle
-		# which includes enabling uuid
-		execPrint("$site/admin/patch_config.pl -b $site/conf/Config.nmis /system/non_stateful_events='Node Configuration Change, Node Reset, NMIS runtime exceeded' /globals/uuid_add_with_node=true /system/node_summary_field_list,=uuid /system/json_node_fields,=uuid");
+		# which includes enabling uuid and showing the polling_policy
+		execPrint("$site/admin/patch_config.pl -b $site/conf/Config.nmis /system/non_stateful_events='Node Configuration Change, Node Reset, NMIS runtime exceeded' /globals/uuid_add_with_node=true /system/node_summary_field_list,=uuid /system/json_node_fields,=uuid /system/network_viewNode_field_list,=polling_policy");
 		echolog("\n");
 
 		if (input_yn("OK to remove syslog and JSON logging from default event escalation?"))
@@ -1059,8 +1089,8 @@ if (!$isnewinstall)
 {
 	printBanner("Checking Common-database file for updates");
 
-	# two cases: something not found -> migration tool to update, missing stuff, FIRST.
-	# then if there are any issues with actual actual differences, full migration tool run
+	# two cases: something new -> updateconfig.pl to fill that in
+	# then if there are an issues with actual actual differences, full migration tool run
 	my $diffs = `$site/admin/diffconfigs.pl $site/models/Common-database.nmis $site/models-install/Common-database.nmis 2>/dev/null`;
 	my $res = $? >> 8;
 
@@ -1071,9 +1101,8 @@ if (!$isnewinstall)
 	}
 	elsif ($diffs =~ m!^-\s+<NOT PRESENT!m)
 	{
-		# perform a missingonly update
 		echolog("Found new entries, adding them.");
-		execPrint("$site/admin/migrate_rrd_locations.pl newlayout=$site/models-install/Common-database.nmis missingonly=true leavelocked=true");
+		execPrint("$site/admin/updateconfig.pl $site/models-install/Common-database.nmis $site/models/Common-database.nmis");
 		print "\n\n";
 	}
 
@@ -1381,7 +1410,7 @@ printBanner("NMIS State ".($isnewinstall? "Initialisation":"Update"));
 
 # now offer to run an (initial) update to get nmis' state initialised
 # and/or updated
-if ( input_yn("NMIS Update: This may take up to 30 seconds\n(or a very long time with MANY nodes)...\n
+if ( !$noninteractive && input_yn("NMIS Update: This may take up to 30 seconds\n(or a very long time with MANY nodes)...\n
 Ok to run an NMIS type=update action?"))
 {
 	print "Update running, please be patient...\n";
@@ -1389,7 +1418,7 @@ Ok to run an NMIS type=update action?"))
 }
 else
 {
-	print "Ok, continuing without the update run as directed.\n\n
+	print "Continuing without the update run as directed.\n\n
 It's highly recommended to run nmis.pl type=update once initially
 and after every NMIS upgrade - you should do this manually.\n";
 	&input_ok;
@@ -1485,8 +1514,8 @@ EOF
 	$nmisModules->{"Crypt::DES"} = { file => "MODULE NOT FOUND", type => "use", by => "lib/snmp.pm" };
 	$nmisModules->{"Digest::HMAC"} = { file => "MODULE NOT FOUND", type => "use", by => "lib/snmp.pm" };
 
-	# these are critical for getting mojolicious installed, as centos 6 perl has a much too old perl
-	# these modules are in core since 5.19 or thereabouts
+	# most of these are critical for getting mojolicious installed, as centos 6
+	# has a much too old perl. many of these modules are in core since 5.19 or thereabouts
 
 	$nmisModules->{"IO::Socket::IP"} = { file => "MODULE NOT FOUND", type  => "use",
 																			 by => "lib/Auth.pm", priority => 99 };
@@ -1507,6 +1536,10 @@ EOF
 	$nmisModules->{"Test::More"} = { file => "MODULE NOT FOUND", type  => "use",
 																	 by => "lib/Auth.pm", minversion => "0.96", priority => 100 };
 
+	# and time::moment doesn't install cleanly if extutils::parsexs isn't fully installed first
+	$nmisModules->{"ExtUtils::ParseXS"} = { file => "MODULE NOT FOUND", type  => "use",
+																		 by => "lib/Auth.pm", minversion => "3.18",
+																		 priority => 100 };
 
 	# now determine if installed or not.
 	# sort by the required cpan sequencing (no priority is last)
@@ -1553,7 +1586,7 @@ sub moduleVersion
 	open FH,"<$mFile" or return 'FileNotFound';
 	while (<FH>)
 	{
-		if (/^\s*((our|my)\s+\$|\$(\w+::)*)VERSION\s*=\s*['"]?\s*[vV]?([0-9\.]+)\s*['"]?s*;/)
+		if (/^\s*((our|my)\s+\$|\$(\w+::)*)VERSION\s*=\s*['"]?\s*[vV]?([0-9\._]+)\s*['"]?s*;/)
 		{
 			close FH;
 			return $4;
@@ -1634,33 +1667,42 @@ to be installed (or upgraded) before NMIS will work fully:\n\n| . join(" ", @cri
 }
 
 
-# print question, return true if y (or in unattended mode). default is yes.
-sub input_yn
-{
-	my ($query) = @_;
-
-	print $query;
-	if ($noninteractive)
-	{
-		print " (auto-default YES)\n\n";
-		return 1;
-	}
-	else
-	{
-		print "\nType 'y' or hit <Enter> to accept, any other key for 'no': ";
-		my $input = <STDIN>;
-		chomp $input;
-		logInstall("User input for \"$query\": \"$input\"");
-
-		return ($input =~ /^\s*(y|yes)?\s*$/i)? 1:0;
-	}
-}
-
 # prints prompt, waits for confirmation
 sub input_ok
 {
 	print "\nHit <Enter> to continue:\n";
 	my $x = <STDIN> if (!$noninteractive);
+}
+
+# print question, return true if y (or in unattended mode). default is yes.
+sub input_yn
+{
+	my ($query) = @_;
+
+	while (1)
+	{
+		print $query;
+		if ($noninteractive)
+		{
+			print " (auto-default YES)\n\n";
+			return 1;
+		}
+		else
+		{
+			print "\nType 'y' or <Enter> to accept, or 'n' to decline: ";
+			my $input = <STDIN>;
+			chomp $input;
+			logInstall("User input for \"$query\": \"$input\"");
+
+			if ($input !~ /^\s*[yn]?\s*$/i)
+			{
+				print "Invalid input \"$input\"\n\n";
+				next;
+			}
+
+			return ($input =~ /^\s*y?\s*$/i)? 1:0;
+		}
+	}
 }
 
 # question, default answer, whether we want confirmation or not
@@ -1821,7 +1863,7 @@ sub enable_custom_repo
 	elsif ($reponame eq "gf")
 	{
 		echolog("\nEnabling Ghettoforge repository\n");
-		execPrint("yum -y install 'http://mirror.symnds.com/distributions/gf/el/$majorlevel/gf/x86_64/gf-release-$majorlevel-10.gf.el$majorlevel.noarch.rpm'");
+		execPrint("yum -y install 'http://mirror.ghettoforge.org/distributions/gf/gf-release-latest.gf.el$majorlevel.noarch.rpm'");
 	}
 	else
 	{

@@ -71,13 +71,16 @@ my %hash = (
 		"roletype_list" => "core,distribution,access,default",
 		"nettype_list" => "wan,lan,vpn,man,san,voice,default",
 		"nodetype_list" => "generic,switch,router,firewall,server",
+		
+		# new configuration option to have a configurable field to use for location, e.g. sysLocation or location.
+		'location_field_name' => 'sysLocation',
 
 		# for coloring the group status panel . 'default' applies to unlisted role types
 		'severity_by_roletype' => { core => [ 'Critical', 'Major' ], distribution => [ 'Major', 'Minor' ],
 																access => [ 'Minor', 'Warning' ], default => [ 'Major', 'Minor' ] },
     # if this option is present, then *only* properties listed here will be shown in the node view,
     # and in precisely this order. custom properties are supported.
-    'network_viewNode_field_list' => 'status,sysName,host_addr,group,customer,location,businessService,serviceStatus,nodeType,nodeModel,sysUpTime,sysLocation,sysContact,sysDescr,ifNumber,lastUpdate,nodeVendor,sysObjectName,roleType,netType',
+    'network_viewNode_field_list' => 'status,outage,sysName,host_addr,group,customer,location,businessService,serviceStatus,nodeType,nodeModel,polling_policy,sysUpTime,sysLocation,sysContact,sysDescr,ifNumber,lastUpdate,nodeVendor,sysObjectName,roleType,netType',
 
 		# if this option is present use binary logic for node down and set the level to the overall_node_status_level
     'overall_node_status_coarse' => 'false',
@@ -182,6 +185,8 @@ my %hash = (
 		'max_child_runtime' => undef,
 		# to disable the generation of "nmis runtime exceeded" events, set this to 1 or true
 		'disable_nmis_process_events' => undef,
+		# produce STDERR output (and thus cron emails) if killing nmis processes
+		'verbose_nmis_process_events' => 'true',
 		# to enable the logging of polling time to the NMIS log, will log every node every 5 minutes, set this to 1 or true
 		'log_polling_time' => undef,
 		# various selftest limits
@@ -296,6 +301,7 @@ my %hash = (
     'daemon_ipsla_filename' => 'ipslad.pl',
     'daemon_fping_active' => 'true',
     'daemon_fping_dns_cache' => 'true',
+		'daemon_fping_run_escalation' => 'true', 
     'daemon_fping_filename' => 'fpingd.pl'
   },
 

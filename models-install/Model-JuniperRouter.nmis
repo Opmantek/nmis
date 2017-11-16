@@ -31,6 +31,10 @@
       'jnxOperations' => {
         'common-model' => 'Juniper-jnxOperations'
       },
+      'jnxCoS' => {
+      ### this section is off by default as controlled by model_policy.nmis
+        'common-model' => 'Juniper-jnxCoS'
+      },
     }
   },
   'interface' => {
@@ -429,8 +433,14 @@
     }
   },
   'systemHealth' => {
-    'sections' => 'bgpPeer,ospfNbr,jnxOperations,lldp,lldpLocal,entityMib',
+    'sections' => 'bgpPeer,ospfNbr,jnxOperations,lldp,lldpLocal,entityMib,Juniper_CoS,jnxDestinationClassUsage,jnxSourceClassUsage',
+###  Note:  the following sections are turned off by model_policy.nmis by default Juniper_CoS, jnxDestinationClassUsage, jnxSourceClassUsage
+
+    
   },
+  
+  
+  
   'stats' => {
   	'type' => {
       'health' => [

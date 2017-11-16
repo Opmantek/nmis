@@ -27,7 +27,7 @@
 #
 # *****************************************************************************
 package Sys;
-our $VERSION = "2.0.0";
+our $VERSION = "2.1.0";
 
 use strict;
 use lib "../../lib";
@@ -41,7 +41,7 @@ use WMI;
 use Fcntl qw(:DEFAULT :flock);
 use Data::Dumper;
 $Data::Dumper::Indent = 1;
-use List::Util;
+use List::Util 1.33;						# older versions have no working any()
 use Clone;
 
 # the sys constructor does next to nothing, just roughly setup the structure
@@ -122,10 +122,12 @@ sub status
 #
 # node config is loaded if snmp or wmi args are true
 # args: node (mostly required, or name), snmp (defaults to 1), wmi (defaults to the value for snmp),
-# update (defaults to 0), cache_models (see code comments for defaults), force (defaults to 0)
+# update (defaults to 0), cache_models (see code comments for defaults), force (defaults to 0),
+# policy (default unset)
 #
 # update means ignore model loading errors, also disables cache_models
 # force means ignore the old node file, only relevant if update is enabled as well.
+# if policy is given (hashref of ping/wmi/snmp => numeric seconds) then the rrd db params are overridden
 #
 # returns: 1 if _everything_ was successful, 0 otherwise, also sets details for status()
 sub init
@@ -138,10 +140,13 @@ sub init
 	$self->{debug} = $args{debug};
 	$self->{update} = getbool($args{update});
 
+	my $policy = $args{policy};		# optional
+
 	# flag for init snmp accessor, default is yes
 	my $snmp = getbool(exists $args{snmp}? $args{snmp}: 1);
 	# ditto for wmi, but default from snmp
 	my $wantwmi = getbool(exists $args{wmi}? $args{wmi} : $snmp);
+
 
 	my $C = loadConfTable();			# needed to determine the correct dir; generally cached and a/v anyway
 	if (ref($C) ne "HASH" or !keys %$C)
@@ -248,8 +253,8 @@ sub init
 	my $curmodel = $self->{info}{system}{nodeModel};
 	my $loadthis = "Model";
 
-	# get the specific model
-	if ($curmodel and not $self->{update})
+	# get the node's model IFF its valid
+	if ($curmodel and $curmodel ne "Model" and not $self->{update})
 	{
 		$loadthis = "Model-$curmodel";
 	}
@@ -264,6 +269,94 @@ sub init
 	dbg("loading model $loadthis for node $self->{name}");
 	# model loading failures are terminal
 	return 0 if (!$self->loadModel(model => $loadthis));
+
+	# if a policy is given, override the database timing part of the model data
+	# traverse all the model sections, find out which sections are subject to which timing policy
+	if (ref($policy) eq "HASH")
+	{
+		# must get that before it's overwritten
+		my $standardstep = $self->{mdl}->{database}->{db}->{timing}->{default}->{poll} // 300;
+		my %resizeme;								# section name -> factor
+
+		for my $topsect (keys %{$self->{mdl}})
+		{
+			next if (ref($self->{mdl}->{$topsect}->{rrd}) ne "HASH");
+			for my $subsect (keys %{$self->{mdl}->{$topsect}->{rrd}})
+			{
+				my $interesting = $self->{mdl}->{$topsect}->{rrd}->{$subsect};
+				my $haswmi = ref($interesting->{wmi}) eq "HASH";
+				my $hassnmp = ref($interesting->{snmp}) eq "HASH";
+
+				if ($hassnmp and $haswmi)
+				{
+					dbg("section $subsect subject to both snmp and wmi poll policy overrides: "
+							. "poll snmp $policy->{snmp}, wmi $policy->{wmi}") if ($self->{debug} > 1);
+					# poll: smaller of the two, heartbeat: larger of the two
+					my $poll = defined($policy->{snmp})?  $policy->{snmp} : 300;
+					$poll = $policy->{wmi} if (defined($policy->{wmi}) && $policy->{wmi} < $poll);
+					$poll ||= 300;
+
+					my $heartbeat = defined($policy->{snmp})?  $policy->{snmp} : 300;
+					$heartbeat = $policy->{wmi} if (defined($policy->{wmi}) && $policy->{wmi} > $heartbeat);
+					$heartbeat ||= 300;
+					$heartbeat *= 3;
+
+					my $thistiming = $self->{mdl}->{database}->{db}->{timing}->{$subsect} ||= {};
+
+					$thistiming->{poll} = $poll;
+					$thistiming->{heartbeat} = $heartbeat;
+
+					dbg("overrode rrd timings for $subsect with step $poll, heartbeat $heartbeat");
+					$resizeme{$subsect} = $standardstep / $poll;
+				}
+				elsif ($haswmi or $hassnmp)
+				{
+					my $which = $hassnmp? "snmp" : "wmi";
+					if (defined $policy->{$which})
+					{
+						dbg("section \"$subsect\" subject to $which polling policy override: poll $policy->{$which}")
+								if ($self->{debug} > 1);
+
+						my $thistiming = $self->{mdl}->{database}->{db}->{timing}->{$subsect} ||= {};
+						$thistiming->{poll} = $policy->{$which} || 300;
+						$thistiming->{heartbeat} = 3*( $policy->{$which} || 900);
+
+						$resizeme{$subsect} = $standardstep / $thistiming->{poll};
+					}
+				}
+			}
+		}
+		# AND set the default to the snmp timing, to cover unmodelled sections
+		# (which are currently all snmp-based, e.g. hrsmpcpu)
+		if ($policy->{snmp})				# not null
+		{
+			$self->{mdl}->{database}->{db}->{timing}->{default}->{poll} = $policy->{snmp};
+			$self->{mdl}->{database}->{db}->{timing}->{default}->{heartbeat} = 3* $policy->{snmp};
+			$resizeme{default} = $standardstep / $policy->{snmp};
+		}
+
+		# increase the rows_* sizes for these sections, if the step is shorter than the default
+		# use 'default' or hardcoded default if missing
+		my $standardsize = (ref($self->{mdl}->{database}->{db}->{size}) eq "HASH"
+												&& ref($self->{mdl}->{database}->{db}->{size}->{default}) eq "HASH"?
+												{ %{$self->{mdl}->{database}->{db}->{size}->{default} }} # shallow clone required, default is ALSO changed!
+												: { step_day => 1, step_week => 6, step_month => 24, step_year => 288,
+														rows_day => 2304, rows_week => 1536, rows_month => 2268, rows_year => 1890 });
+		for my $maybe (sort keys %resizeme)
+		{
+			my $factor = $resizeme{$maybe};
+			next if ($factor <= 1);
+
+			my $sizesection = $self->{mdl}->{database}->{db}->{size} ||= {};
+			$sizesection->{$maybe} ||= { %$standardsize }; # shallow clone
+			for my $period (qw(day week month year))
+			{
+				$sizesection->{$maybe}->{"rows_$period"} =
+						int($factor * $sizesection->{$maybe}->{"rows_$period"} + 0.5); # round up/down
+			}
+			dbg(sprintf("overrode rrd row counts for $maybe by factor %.2f",$factor)) if ($self->{debug} > 1);
+		}
+	}
 
 	# init the snmp accessor if snmp wanted and possible, but do not connect (yet)
 	if ($self->{name} and $snmp and $thisnodeconfig->{collect})
@@ -327,9 +420,10 @@ sub open
 	# prime config for snmp, based mostly on cfg->node - cloned to not leak any of the updated bits
 	my $snmpcfg = Clone::clone($self->{cfg}->{node});
 
-	# check if numeric ip address is available for speeding up, conversion done by type=update
-	$snmpcfg->{host} = ( $self->{info}{system}{host_addr}
-											 || $self->{cfg}{node}{host} || $self->{cfg}{node}{name} );
+	# check if numeric ip address is available for speeding up, update done in getnodeinfo, AFTER this open
+	# hence host_addr must be ignored if this is type=update, or a bad one will never clear
+	$snmpcfg->{host} = (($self->{update}? undef : $self->{info}{system}{host_addr})
+											|| $self->{cfg}{node}{host} || $self->{cfg}{node}{name});
 	$snmpcfg->{timeout} = $args{timeout} || 5;
 	$snmpcfg->{retries} = $args{retries} || 1;
 	$snmpcfg->{oidpkt} = $args{oidpkt} || 10;
@@ -724,6 +818,15 @@ sub getValues
 				$status{skipped} = "skipped $sectionname because of control expression";
 				next;
 			}
+		}
+
+		# check if we should just skip any collect and leave this to a plugin to collect
+		# we need to have an rrd section so we can define the graphtypes.
+		if ($thissection->{skip_collect} and getbool($thissection->{skip_collect}))
+		{
+			dbg("skip_collect $thissection->{skip_collect} found for section=$sectionname",2);
+			$status{skipped} = "skipped $sectionname because skip_collect set to true";
+			next;
 		}
 
 		# should we add graphtype to given (info) table?
@@ -1142,8 +1245,9 @@ sub loadModel
 		createDir($modelcachedir);
 		setFileProt($modelcachedir);
 	}
-	my $thiscf = "$modelcachedir/$model.json";
 
+	my $shortname = $model; $shortname =~ s/^Model-//;
+	my $thiscf = "$modelcachedir/$model.json";
 	if ($self->{cache_models} && -f $thiscf)
 	{
 		$self->{mdl} = readFiletoHash(file => $thiscf, json => 1, lock => 0);
@@ -1166,6 +1270,11 @@ sub loadModel
 		}
 		else
 		{
+			# prime the nodeModel property from the model's filename,
+			# ignoring whatever may be in the deprecated nodeModel property
+			# in the model file
+			$self->{mdl}->{system}->{nodeModel} = $shortname;
+
 			# continue with loading common Models
 			foreach my $class (keys %{$self->{mdl}{'-common-'}{class}})
 			{
@@ -1196,6 +1305,7 @@ sub loadModel
 		}
 	}
 
+
 	# if the loading has succeeded (cache or from source), optionally amend with rules from the policy
 	if ($exit)
 	{
@@ -1218,7 +1328,7 @@ sub loadModel
 					my ($sourcename,$propname) = ($1,$2);
 
 					my $value = ($proppath eq "node.nodeModel"?
-											 $model : ($sourcename eq "config"? $C : $self->{info}->{system} )->{$propname});
+											 $shortname : ($sourcename eq "config"? $C : $self->{info}->{system} )->{$propname});
 					$value = '' if (!defined($value));
 
 					# choices can be: regex, or fixed string, or array of fixed strings
@@ -1244,7 +1354,7 @@ sub loadModel
 				}
 				else
 				{
-					db("ERROR, ignoring policy $polnr with invalid property path \"$proppath\"");
+					dbg("ERROR, ignoring policy $polnr with invalid property path \"$proppath\"");
 					$rulematches = 0;
 				}
 				next NEXTRULE if (!$rulematches); # all IF clauses must match
@@ -1744,6 +1854,12 @@ sub writeNodeInfo
 	# remove ancient unwanted legacy info
 	delete $self->{info}{view_system};
 	delete $self->{info}{view_interface};
+
+	# add legacy compat info, for opCharts which accesses
+	# lastUpdatePoll (which is set on type=update!) and lastUpdateSec (which is set on type=poll!)
+	# note that there's also the independent lastCollectPoll, but that is not set/used everywhere.
+	$self->{info}->{system}->{lastUpdateSec} = 	$self->{info}->{system}->{last_poll};
+	$self->{info}->{system}->{lastUpdatePoll} = 	$self->{info}->{system}->{last_update};
 
 	my $ext = getExtension(dir=>'var');
 
