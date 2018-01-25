@@ -29,7 +29,7 @@
 # *****************************************************************************
 #
 # this helper upgrades model files where safe to do so
-our $VERSION="8.6.2a";
+our $VERSION="8.6.3G";
 
 use strict;
 use Digest::MD5;								# good enough
@@ -480,7 +480,7 @@ Model-FutureSoftware.nmis 92096009cb54d5d0 cc2be4402dd800b9
 Model-GE-QS941.nmis 64cf727e20bfe0f5 61b3564fc34b7534 5cab506ad33ae94e
 Model-Generic.nmis 9f6e87c2dced82ce e2352bb53b48d526 6421c79212254318
 Model-HP-Procurve.nmis d640db73cf1a2489
-Model-Huawei-MA5600.nmis daa2a0723e5e7330 9e752b89778e1542 9e232402e57166e7
+Model-Huawei-MA5600.nmis c71eda97df358ee2 9e752b89778e1542 daa2a0723e5e7330 9e232402e57166e7
 Model-Huawei-NetEngine.nmis 34ac1c5aaec02f3e
 Model-HuaweiRouter.nmis cbcb03fd241ba9e3
 Model-Juniper-ERX.nmis bad56f405ba7e1f0 d66d891e14df1c12
