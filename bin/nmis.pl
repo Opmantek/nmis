@@ -192,7 +192,7 @@ if ($type =~ /^(collect|update|services)$/)
 {
 	runThreads(type=>$type, nodeselect=>$nodeselect, groupselect=>$groupselect, mthread=>$mthread, mthreadDebug=>$mthreadDebug);
 }
-elsif ( $type eq "escalate") { runEscalate(); printRunTime(); } # included in type=collect
+elsif ( $type eq "escalate") { runEscalate(independent => 1); printRunTime(); } # included in type=collect
 elsif ( $type eq "config" ) { checkConfig(change => "true"); }
 elsif ( $type eq "audit" ) { checkConfig(audit => "true", change => "false"); }
 elsif ( $type eq "links" ) { runLinks(); } # included in type=update
@@ -221,7 +221,10 @@ elsif ( $type eq "threshold" )
 }
 elsif ( $type eq "master" ) { nmisMaster(); printRunTime(); } # MIGHT be included in type=collect
 elsif ( $type eq "groupsync" ) { sync_groups(); }
-elsif ( $type eq "purge" ) { my $error = purge_files(); die "$error\n" if $error; }
+elsif ( $type eq "purge" ) {
+	my $error = purge_files(); die "$error\n" if $error;
+	my $res = NMIS::purge_outages(); die "$res->error\n" if !$res->{success};
+}
 else { checkArgs(); }
 
 exit;
@@ -516,28 +519,36 @@ sub	runThreads
 				$whichflavours{$maybe}->{wmi} = $whichflavours{$maybe}->{snmp} = 1; # and ignore the last-xyz markers
 			}
 			# nodes that have not been pollable since forever: run at most once daily
+			# ...except if the demote_faulty_nodes config option is set to false
 			elsif (!$ninfo->{system}->{nodeModel} or $ninfo->{system}->{nodeModel} eq "Model")
 			{
 				my $lasttry = $ninfo->{system}->{last_poll} // 0;
 
-				# was polling attempted at all and in the last 30 days? then once daily from
+				# try once every 5 minutes if demote_faulty_nodes is set to false,
+				# otherwise: was polling attempted at all and in the last 30 days? then once daily from
 				# that last try - otherwise try one now
-				my $nexttry = ($lasttry && ($now - $lasttry) <= 30*86400)? ($lasttry + 86400 * 0.95) : $now;
+				my $nexttry = !getbool($C->{demote_faulty_nodes},"invert")? # === ne false
+						($lasttry && ($now - $lasttry) <= 30*86400)? ($lasttry + 86400 * 0.95) : $now : $lasttry + 300 ;
 
 				if ($nexttry <= $now)
 				{
 					push @todo_nodes, $maybe;
 					$whichflavours{$maybe}->{wmi} = $whichflavours{$maybe}->{snmp} = 1;
 				}
-				else
+				# if demotion is enabled, log this pretty dire situation
+				# but not too noisily - with a default poll every minute this
+				# will log the issue once an hour.
+				elsif (!getbool($C->{demote_faulty_nodes},"invert")) # === ne false
 				{
-					# log this pretty dire situation but not too noisy - with a default poll every minute this
-					# will log the issue once an hour
 					my $goodtimes = int((($now - $lasttry) % 3600) / 60);
 					my $msg = "Node $maybe has no valid nodeModel, never polled successfully, "
 							 . "demoted to frequency once daily, last attempt $lasttry, next $nexttry";
 					logMsg($msg) if ($goodtimes == 0);
 					dbg($msg);
+				}
+				else
+				{
+					dbg("Node $maybe has no valid nodeModel, never polled successfully. demote_faulty_nodes is disabled, last attempt $lasttry, next $nexttry.");
 				}
 			}
 			# logic for collect now or later: candidate if no past successful collect whatsoever,
@@ -5622,7 +5633,7 @@ hrSWRunType hrSWRunPerfCPU hrSWRunPerfMem))
 				# program is disconnected from stdin; stderr goes into a tmpfile
 				# and is collected separately for diagnostics
 
-				my $stderrsink = POSIX::tmpnam(); # good enough, no atomic open required
+				my $stderrsink = File::Temp::mktemp(File::Spec->tmpdir()."/nmis.XXXXXX");		# good enough, no atomic open required
 				dbg("running external program '$thisservice->{Program} $finalargs', "
 						.(getbool($thisservice->{Collect_Output})? "collecting":"ignoring")." output");
 				$pid = open(PRG,"$thisservice->{Program} $finalargs </dev/null 2>$stderrsink |");
@@ -7028,17 +7039,29 @@ sub summaryCache
 ### things, ie if escalate0 = 5 then an interface goes down, no alert sent, next
 ### poll interface goes up and event cancelled!  Downside is a little longer before
 ### receiving first notification, so it depends on what the support SLA is.
-
-### 11-Nov-11, keiths, update to this, changed the escalation so that through policy you can
-### wait for 5 mins or just notify now, so Ecalation0 is 0 seconds, Escalation1 is 300 seconds
-### then in Ecalations.xxxx, core devices might notify at Escalation0 while others at Escalation1
+# args: independent (optional, default 0; if set we ensure that only one runescalate process is active)
+# returns: nothing
 sub runEscalate
 {
 	my %args = @_;
+	my $C = loadConfTable();
+
+	if (getbool($args{independent}))
+	{
+		# check that there are no other running/stuck/delayed escalate processes
+		my $others = func::find_nmis_processes(config => $C,
+																					 type => 'escalate');
+		if (keys %$others)
+		{
+			logMsg("ERROR other type=escalate processes running (".join(", ", keys %$others)."), aborting operation.");
+			info("ERROR other type=escalate processes running (".join(", ", keys %$others)."), aborting operation.");
+			return;
+		}
+	}
+	$0 = "nmis-".$C->{conf}."-escalate";
 
 	my $pollTimer = NMIS::Timing->new;
 
-	my $C = loadConfTable();
 	my $NT = loadLocalNodeTable();
 
 	my $outage_time;

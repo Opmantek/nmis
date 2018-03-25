@@ -27,7 +27,7 @@
 #
 # *****************************************************************************
 package NMIS;
-our $VERSION = "8.6.3G";
+our $VERSION = "8.6.4G";
 
 use NMIS::uselib;
 use lib "$NMIS::uselib::rrdtool_lib";
@@ -2018,7 +2018,7 @@ sub update_outage
 
 	func::audit_log(who => $meta->{user},
 									what => ($op_create? "create_outage" : "update_outage"),
-									where => $outid, how => "ok", defails => $meta->{details}, when => undef);
+									where => $outid, how => "ok", details => $meta->{details}, when => undef);
 
 	return { success => 1, id => $outid};
 }
@@ -2069,6 +2069,32 @@ sub upgrade_outages
 	return undef;
 }
 
+# removes past none-recurring outages after a configurable time
+# returns: hashref, keys success/error
+sub purge_outages
+{
+	my $C = loadConfTable();			# likely cached
+
+	my $maxage = $C->{purge_outages_after} // 86400;
+	return { success => 1, message => "Outage expiration is disabled." } if ($maxage <= 0); # 0 or negative? no purging
+
+	my $data = loadTable(dir => "conf", name => "Outages")
+			if (existFile(dir => "conf", name => "Outages")); # or we get lots of log noise
+	return { success => 1, message => "No outages exist." } if !$data;
+
+	my @problems;
+	for my $outid (keys %$data)
+	{
+		my $thisoutage = $data->{$outid};
+		next if ($thisoutage->{frequency} ne "once"
+						 or $thisoutage->{end} >= time - $maxage);
+
+		my $res = remove_outage(id => $outid, meta => {details => "purging expired past outage" });
+		push @problems, "$outid: $res->{error}" if (!$res->{success}); # but let's continue
+	}
+
+	return (@problems? { error => join("\n", @problems) } : { success => 1 });
+}
 
 
 # take a relative/incomplete time and day specification and make into absolute timestamp
@@ -2182,7 +2208,7 @@ sub _prev_next_interval
 
 # remove existing outage
 # args: id, optional meta (for audit logging, keys user, details)
-# returns: hashrev, keys success/error
+# returns: hashref, keys success/error
 sub remove_outage
 {
 	my (%args) = @_;
@@ -2208,7 +2234,7 @@ sub remove_outage
 									what => "remove_outage",
 									where => $id,
 									how => "ok",
-									defails => $meta->{details},
+									details => $meta->{details},
 									when => undef);
 
 	return { success => 1};
@@ -3022,7 +3048,6 @@ sub pageStart {
 	my $jscript = $args{jscript};
 	$jscript = getJavaScript() if ($jscript eq "");
 	$title = "NMIS by Opmantek" if ($title eq "");
-	$refresh = 300 if ($refresh eq "");
 
 	my $C = loadConfTable();
 
@@ -3030,9 +3055,11 @@ sub pageStart {
 |<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
   <head>
-    <title>$title</title>
-    <meta http-equiv="refresh" content="$refresh" />
-    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+	<title>$title</title>|,
+	(defined($refresh) && $refresh > 0 ?
+	 qq|<meta http-equiv="refresh" content="$refresh" />\n| : ""),
+
+	qq|<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store" />
     <meta http-equiv="Expires" content="-1" />
@@ -3059,7 +3086,6 @@ sub pageStartJscript {
 	my $title = $args{title};
 	my $refresh = $args{refresh};
 	$title = "NMIS by Opmantek" if ($title eq "");
-	$refresh = 86400 if ($refresh eq "");
 
 	my $C = loadConfTable();
 
@@ -3067,9 +3093,11 @@ sub pageStartJscript {
 |<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
   <head>
-    <title>$title</title>
-    <meta http-equiv="refresh" content="$refresh" />
-    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+	<title>$title</title>|,
+	(defined($refresh) && $refresh > 0?
+	 qq|<meta http-equiv="refresh" content="$refresh" />\n| : "" ),
+
+  qq|<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store" />
     <meta http-equiv="Expires" content="-1" />

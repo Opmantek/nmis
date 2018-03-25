@@ -29,7 +29,7 @@
 # *****************************************************************************
 #
 # this helper upgrades model files where safe to do so
-our $VERSION="8.6.3G";
+our $VERSION="8.6.4G";
 
 use strict;
 use Digest::MD5;								# good enough
@@ -527,4 +527,4 @@ Model-ZyXEL-GS.nmis 72f30722cd3e6665 b7eeb6155653a42b 8666c252de0c306b 15e94a542
 Model-ZyXEL-IES.nmis 25aaccabbd188208 593c69cbe0391cf3 0da840e65c219e00 3ab9322fece09797 4e5954eff8347757 7b098aa3c8afa7de
 Model-ZyXEL-MGS.nmis c3ea5aec5b903e8e bff9ef1e5d0a70d8 94ca1a1be8a5eeee 701cf09b9a9dae1e
 Model-net-snmp.nmis c9b5fa32bd1cd51f a78ed1067f7f14ab e321e3f8a79b25c0 13f1d8c3e10ebebc 997fc7bd3be516be 70491c897fe8d828 e106c9b396e76944 d24bab000b0a6fbe b4d10d3789afa1a6 5d97f9cf73a61919 b6518274fab46b78 aa24077be26e5897
-Model.nmis ba5cdf626ee516c1 bece80b7b44d959b 34592112596682e2 a6443ed36ccd2120 c91082df42a88c17 fc6e00d8485d47c7 85b6e9852b359133 0b8ce0fbc6085bea fc31c4ba46c1f4be b8427208bee2fc4d 11d418a22fc2adfb 3c7c7f1471f80e2c efb216ab07a50fd0 d0c4c790f815e46a af53a22555c57f63
+Model.nmis 8bd4ab3e997c6228 bece80b7b44d959b 34592112596682e2 a6443ed36ccd2120 c91082df42a88c17 fc6e00d8485d47c7 85b6e9852b359133 0b8ce0fbc6085bea fc31c4ba46c1f4be b8427208bee2fc4d 11d418a22fc2adfb 3c7c7f1471f80e2c efb216ab07a50fd0 d0c4c790f815e46a af53a22555c57f63 ba5cdf626ee516c1
