@@ -29,7 +29,7 @@
 # *****************************************************************************
 #
 # this helper upgrades model files where safe to do so
-our $VERSION="8.6.4G";
+our $VERSION="8.6.5G";
 
 use strict;
 use Digest::MD5;								# good enough
@@ -184,7 +184,9 @@ Common-Windows-system.nmis 57809a9258f320a4 aded8512fdc1a137
 Common-Windows-wmi.nmis dbc5c412d3fa5cb5 eae47688035b325d 75a6d5002bb1e851
 Common-asset.nmis f6c2fe2777c14437
 Common-calls.nmis 77ca79216fd1aefa
+Common-cbqos-in-nexus.nmis f5b4752af6beb6bd
 Common-cbqos-in.nmis 68c58453714e91dc a0bbc467ffd18646 6c8df3ec0d0c0858
+Common-cbqos-out-nexus.nmis 70c5bdfbb3c17bf3
 Common-cbqos-out.nmis ab31ff8eee5db591 48665448110af552 1210e379c4b6a92d
 Common-database.nmis f5fde11eb5101a3f b3d083221e94f22c 8b309566ec783d52 6514b77ecc0dd2c8 5bacf781a1495ba5 a934b015029bbe63 a41276db67e9be61 92a7f5ebc9af25aa 5f1f1a8792f0498d b70fbcbf9e210596 1b1d1620e6b66683 5dbac9d4f0590b2c 2227e7b78b5547b4 e56cad8dc7066418 4bd336af049d4135 0cf0a876087bd7f2 b32bf11f5b860b3e 411a0d92a51a96a3 b2ff737dc0c025c1
 Common-entityMib.nmis 23129c70d072e098
@@ -460,7 +462,7 @@ Model-CiscoDefault.nmis bceed295301338cf 4bc694b868f257b4
 Model-CiscoGeneric.nmis 7d766076ec3446ae 9f159c3f25a627b9 f589324fb67f9793
 Model-CiscoIOSXE.nmis fbe5563477ffdb80 72b549bdcc0804e9 0cb858418067430b 11f60115dd4cdfad e85f66570c90c7fd
 Model-CiscoIOSXR.nmis 50feb5a84dc20a4d e12b72b784ad1c5f 459049c58d8319dc 1754b6d20d61a74a c1d83637f22d1aea 71c999e29bc3b680 a1affb7cf1ae5495 3fb8ea566f34b6e4 8a531fb238516665 ac6cc4e079004be4
-Model-CiscoNXOS.nmis 4faba51a761da835 aeac57c06f2a8af6 5688a246aed01961 161ae6c49c6f1b3d a00d69038b17aa39 c80d009aa3d6cf1b 155625644907cfdc d80d5e84a5f55776 bc4df1a19cdd8e9b eabfe0a428f6aa5e b1111378863a7d68
+Model-CiscoNXOS.nmis 2b60649213da9262 aeac57c06f2a8af6 5688a246aed01961 161ae6c49c6f1b3d a00d69038b17aa39 c80d009aa3d6cf1b 155625644907cfdc d80d5e84a5f55776 bc4df1a19cdd8e9b eabfe0a428f6aa5e 4faba51a761da835 b1111378863a7d68
 Model-CiscoPIX.nmis 475b6fe16f5f55d4 59f330a515797f53
 Model-CiscoRouter.nmis f4cb68fb386f54c4 54e66e08f36229d9 83ff33224c7c63c0 1bd439a8e31cb653 0bc12598dda8c8a6 24ca17edafeae0b8 d552abe84ee95e51 06598a8a95e10b4e
 Model-CiscoVG.nmis bba37e84817dfed5
