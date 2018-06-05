@@ -29,7 +29,7 @@
 # *****************************************************************************
 #
 # this helper upgrades table files where safe to do so
-our $VERSION="8.6.5G";
+our $VERSION="8.6.6G";
 
 use strict;
 use Digest::MD5;								# good enough
@@ -66,14 +66,14 @@ for (<DATA>)
 {
 	my ($file,@sigs) = split(/\s+/);
 	$knownsigs{$file} = \@sigs;
-	
+
 	# complain if a known install file is missing completely - not terminal in general
 	warn "warning: $newdir/$file is missing!\n" if (!-f "$newdir/$file");
-	
+
 	# and bail out if the purportedly known good new file doesn't match any of the known signatures
 	$newsig{$file} = compute_signature("$newdir/$file");
 	die "error: signature state ($newsig{$file}) for $newdir/$file not part of a known release!\n"
-			if (!grep($_ eq $newsig{$file}, @sigs) and 
+			if (!grep($_ eq $newsig{$file}, @sigs) and
 					(!$opts{n} or $file !~ qr{$opts{n}}));
 }
 
@@ -190,7 +190,7 @@ Table-Events.nmis 7826f94d352fecf8
 Table-Links.nmis 485da1859e3cc036 3f6a43471d7e4cfe
 Table-Locations.nmis 2d63c7fa7954e92a bd24e107f8158818 2e2e263c0c08d268
 Table-Logs.nmis e70cc904a9d923e5
-Table-Nodes.nmis 6cf38465b6dec232 32815befe46ad8e6 c536bfe56a073e41 703420fa55f06eb6 5b144d5f598eb815 013e95cef5802716 80d4c960b5570f70 a8c9b78dd1ad3910 ef34b637d02ba140 948b836801802bf9 7f1a618619af76f7
+Table-Nodes.nmis 78693ff40aba93fb 32815befe46ad8e6 c536bfe56a073e41 703420fa55f06eb6 5b144d5f598eb815 013e95cef5802716 80d4c960b5570f70 a8c9b78dd1ad3910 ef34b637d02ba140 948b836801802bf9 7f1a618619af76f7 6cf38465b6dec232
 Table-Polling-Policy.nmis 7abb03f496c1943f
 Table-Portal.nmis f092a05f0f7a2bbb
 Table-PrivMap.nmis dccc46beb3506fa8
