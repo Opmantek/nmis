@@ -27,7 +27,7 @@
 #  http://support.opmantek.com/users/
 #
 # *****************************************************************************
-our $VERSION = "8.6.6G";
+our $VERSION = "8.6.7G";
 
 use FindBin qw($Bin);
 use lib "$FindBin::Bin/../lib";
@@ -41,6 +41,7 @@ use File::Basename;
 use Test::Deep::NoTest;
 use Statistics::Lite;
 use List::Util 1.33;
+use Clone;
 
 use NMIS;
 use func;
@@ -87,26 +88,40 @@ my $logfile = $C->{'fpingd_log'};
 my $pidfile = $C->{'<nmis_var>'}."/nmis-fpingd.pid";
 
 # check for any running fpingd instance
-my $alreadyrunning;
+my @others;
 if ( -f $pidfile )
 {
 	open(F, "<$pidfile") or die "failed to read $pidfile: $!\n";
-	$alreadyrunning = <F>;
+	my $alreadyrunning = <F>;
 	chomp $alreadyrunning;
+
+	push @others, $alreadyrunning
+			if (int($alreadyrunning)			# it's numeric
+					and $alreadyrunning != $$	# it's not me (should be impossible)
+					and kill(0, $alreadyrunning)); # and it's really alive
 	close(F);
 }
 
-if ( int($alreadyrunning)				# it's a number
-		 and $alreadyrunning != $$	# and it's not me (should be impossible)
-		 and kill(0, $alreadyrunning) # and it's really alive
-		 and ( $killwanted or $restartwanted )) # and we're to get rid of it
+# and also make sure no others are lurking
+my $ptable = Proc::ProcessTable->new(enable_ttys => 0);
+# note: strict equality is required, or wrapping processes like sudo ./bin/fpingd.pl will be killed as well.
+for my $maybe (grep($_->cmndline eq $C->{'daemon_fping_filename'},
+										@{$ptable->table}))
 {
-	kill('TERM', $alreadyrunning);				# polite then firm
-	sleep(1);
-	kill('KILL', $alreadyrunning);
-	unlink($pidfile);
+	my $thatpid = $maybe->pid;
+	next if ($thatpid == $$);
 
-	debug("Killed process $alreadyrunning");
+	push @others, $thatpid
+			if (!grep($_ eq $thatpid, @others));
+}
+# there must be at most one fpingd instanc under any circumstances
+for my $unwanted (@others)
+{
+	kill('TERM', $unwanted);				# polite then firm
+	sleep(1);
+	kill('KILL', $unwanted);
+
+	logMsg("INFO killed fpingd process $unwanted");
 }
 exit(0) if ($killwanted);
 
@@ -289,6 +304,7 @@ while (!$mustexit)
 			# second time round, handle the secondary
 			else
 			{
+				$noderec = Clone::clone($noderec); # no overwriting of the original record!
 				$noderec->{host} = $noderec->{host_backup};
 				$statekey .= ":1";
 			}
@@ -299,9 +315,12 @@ while (!$mustexit)
 			host => $noderec->{host},	# this is either the  primary or the secondary host/ip
 			policy => $noderec->{polling_policy} || 'default',
 		};
-		$thisstate->{has_sibling} = $thisstate->{uuid}
-		if (exists($multihomed{$thisstate->{uuid}})); # temporary property is present for both
 
+		if (exists($multihomed{$thisstate->{uuid}})) # temporary property is present for both
+		{
+			$thisstate->{has_sibling} = $thisstate->{uuid};
+			$thisstate->{is_primary} = $statekey =~ /:0$/?1:0;
+		}
 		# dynamically managed: ip, lastping,nextping, policy , nextdns, avg min max loss
 
 		# honor fixed ip address given
@@ -337,6 +356,7 @@ while (!$mustexit)
 						. ($thisstate->{nextping}? sprintf(", was due %.2fs ago", $now - $thisstate->{nextping}): "" ))
 						if ($debug > 1);
 			push @todos, $statekey;
+			$thisstate->{pending} = 1;
 		}
 	}
 
@@ -364,16 +384,26 @@ while (!$mustexit)
 			die "Failed to run fping: $!\n";
 		}
 
+		# compile a regex for faster use later
+		my $ignoreIcmpMessages =~ qr/(ICMP Time Exceeded|ICMP Host Unreachable)/;
+
 		while (my $line = <FROMFPING>)
 		{
 			chomp $line;
 			# goodnode : xmt/rcv/%loss = 5/5/0%, min/avg/max = 0.89/0.96/1.05
 			# badnode : xmt/rcv/%loss = 5/0/100%
+			# or weirdnode : xmt/rcv/%return = 2/64/3200%, min/avg/max = 0.49/7.39/8.13
 			# or nothing for unresolvable.
 			debug("fping returned: $line") if ($debug > 2);
 
-			my ($hostnameorip,$loss,$min,$avg,$max) = ($1,$2,$3,$4,$5,$6)
-					if ($line =~ m!^\s*(\S+)\s*:\s*xmt/rcv/%loss\s*=\s*\d+/\d+/(\d+)%(?:,\s*min/avg/max\s*=\s*(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?))?$!);
+			my ($hostnameorip,$dupsorloss,$loss,$min,$avg,$max) = ($1,$2,$3,$4,$5,$6,$7)
+					if ($line =~ m!^\s*(\S+)\s*:\s*xmt/rcv/%(loss|return)\s*=\s*\d+/\d+/(\d+)%(?:,\s*min/avg/max\s*=\s*(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?))?$!);
+
+			if ($dupsorloss eq "return")
+			{
+				logMsg("WARN fping reports ICMP packet duplication: \"$line\"");
+				$loss = 0;
+			}
 
 			if ($hostnameorip								# parseable?
 					&& $ip2staterec{$hostnameorip}  # known?
@@ -402,14 +432,14 @@ while (!$mustexit)
 
 					$thisstate->{lastping} = $now;
 					$thisstate->{nextping} = $now + $interval;
+					delete $thisstate->{pending};
 
 					debug("parsed result for node $thisstate->{name}: ".Dumper($thisstate)) if ($debug > 2);
 				}
 			}
 			else
 			{
-				debug("ERROR fping result \"$line\" was not parseable!");
-				logMsg("ERROR result \"$line\" was not parseable!");
+				debug("WARN fping result \"$line\" was not parseable!");
 			}
 		}
 		close FROMFPING;
@@ -453,41 +483,56 @@ while (!$mustexit)
 
 		# now raise/close nmis events according to the node status
 		# note that multi-homed nodes are down IFF all ips are unreachable
-		if ($thisstate->{loss} == 100)
+		# no answers whatsoever? then complain, we don't know if up or down so can't really raise any events
+		if ($thisstate->{pending})
 		{
-			my $raisenodedown;
+			logMsg("ERROR fping has not reported any state for Node $thisstate->{name} ($thisstate->{ip})!");
+			# remove any misleading data from previous runs
+			delete @{$thisstate}{qw(avg min max loss lastping)};
+		}
+		elsif ($thisstate->{loss} == 100)
+		{
+			my ($whatevent, $details);
 
-			# not multihomed? normal down handling
+			# not multihomed? normal 'node down' event
 			if (!$thisstate->{has_sibling})
 			{
 				debug("Node $thisstate->{name} ($thisstate->{ip}) is NOT REACHABLE, fping reported loss=$thisstate->{loss}%");
-				$raisenodedown = 1;
+				$whatevent = "Node Down";
+				$details = "Ping failed: fping reported 100% ping loss";
 			}
-			# multihomed and all dead
+			# multihomed and all dead, 'node down'
 			elsif (List::Util::none { $_->{has_sibling} eq $thisstate->{has_sibling}
 																&& $_->{loss} != 100 } (values %state))
 			{
-				debug("Node $thisstate->{name} ($thisstate->{ip} and all siblings) is NOT REACHABLE, fping reported loss=$thisstate->{loss}%");
-				$raisenodedown = 1;
+				debug("Node $thisstate->{name} ($thisstate->{ip} and its sibling) is NOT REACHABLE, fping reported loss=$thisstate->{loss}%");
+				$whatevent = "Node Down";
+				$details = "Ping failed: both primary and backup address are unreachable";
 			}
-			# multihomed but somebody else is up
+			# multihomed but not all dead? different events for primary and backup address
 			else
 			{
-				debug("Node $thisstate->{name} ($thisstate->{ip}) is NOT REACHABLE, fping reported loss=$thisstate->{loss}%, but other siblings are up.");
+				debug("Node $thisstate->{name} ($thisstate->{ip}) is NOT REACHABLE, fping reported loss=$thisstate->{loss}%, but other sibling is up.");
+				# node polling failover events are also raised by the snmp/wmi collect code, so clearing is race-y.
+				$whatevent = ($thisstate->{is_primary}? "Node Polling Failover" : "Backup Host Down");
+				$details = ($thisstate->{is_primary}?"Primary address":"Backup address"). " $thisstate->{ip} is unreachable (but the other one is up).";
 			}
 
-			if ($raisenodedown)
+			if ($whatevent)
 			{
 				# for unreachable nodes where we're caching the dns-ip assocition, we mark it as 'recheck dns'
 				# for fixed-ip nodes this is not relevant
 				undef $thisstate->{nextdns};
 
-
-				if (!eventExist($thisstate->{name}, "Node Down", undef))
+				if (!eventExist($thisstate->{name}, $whatevent, undef))
 				{
-					# Device is DOWN, was up, as no entry in event database
-					debug("$thisstate->{name} is now DOWN, was UP, updating event database");
-					fpingNotify($thisstate->{name});
+					debug("$thisstate->{name} is DOWN, raising event $whatevent");
+					my $sys = Sys->new;
+					$sys->init(name => $thisstate->{name}, snmp => 'false');
+					notify(sys => $sys,
+								 event => $whatevent,
+								 details => $details,
+								 context => { type => "node" } );
 					++$escalatables;
 				}
 			}
@@ -495,18 +540,38 @@ while (!$mustexit)
 		else # node somewhat pingable, not 100% loss
 		{
 			debug("$thisstate->{name} ($thisstate->{ip}) is pingable: returned min/avg/max = $thisstate->{min}/$thisstate->{avg}/$thisstate->{max}ms loss=$thisstate->{loss}%");
+			my $details = "Ping ok: fping reported $thisstate->{loss}% loss";
 
-			# check the event existence AND its currency!
-			my $event_exists = eventExist($thisstate->{name}, "Node Down", undef);
-			my $erec = eventLoad(filename => $event_exists) if ($event_exists);
+			# what kind of event(s) do we have to cancel/close?
+			# if not multihomed, or multihomed (and at least one of primary/backup is up,
+			#  which is already certain when in this logic branch): node down
+			# plus, if multihomed: 'backup host down' for the backup, or 'node polling failover' for the primary
+			my @toclear = ("Node Down");
+			push @toclear, ($thisstate->{is_primary}? "Node Polling Failover" : "Backup Host Down") if ($thisstate->{has_sibling});
+			my $sys;
 
-			if ($event_exists and $erec and getbool($erec->{current}))
+			for my $clearme (@toclear)
 			{
-				# Device was down is now UP!
-				# Only post the status if the event database records as currently down
-				debug("$thisstate->{name} ($thisstate->{ip}) is now UP, was DOWN, updating event database");
-				fpingCheckEvent($thisstate->{name});
-				++$escalatables;
+				# check the event existence AND its currency!
+				my $event_exists = eventExist($thisstate->{name}, $clearme, undef);
+				my $erec = eventLoad(filename => $event_exists) if ($event_exists);
+
+				if ($event_exists and $erec and getbool($erec->{current}))
+				{
+					debug("$thisstate->{name} ($thisstate->{ip}) is now UP, clearing event $clearme");
+					if (!ref($sys))
+					{
+						$sys = Sys->new;
+						$sys->init(name => $thisstate->{name}, snmp => 'false');
+					}
+					checkEvent( sys	=> $sys,
+											event => $clearme,
+											# the failover event should be logged with this name
+											upevent => ($clearme eq "Node Polling Failover"? "Node Polling Failover Closed" : undef),
+											level => "Normal",
+											details => $details);
+					++$escalatables;
+				}
 			}
 		}
 	}
@@ -543,44 +608,6 @@ while (!$mustexit)
 exit 0;
 
 
-# check-and-remove existing node down event
-# args: node name
-# returns: nothing
-sub fpingCheckEvent
-{
-	my $node = shift;
-	debug("\tUpdating event database via sub checkEvent() host: $node event: Node Up");
-
-	my $S = Sys::->new;
-	$S->init(name => $node, snmp => 'false');
-	my $NI = $S->ndinfo; # pointer to node info table
-
-	checkEvent( sys		=> $S,
-							event   => "Node Down",
-							element => "",
-							level   => "Normal",
-							details => "Ping failed" );
-}
-
-# create a new node down event
-# args: node name
-# returns: nothing
-sub fpingNotify
-{
-	my $node = shift;
-
-	debug("\tUpdating event database via sub notify() host: $node event: Node Down");
-
-	my $S = Sys::->new;
-	$S->init(name=>$node, snmp=>'false');
-
-	notify(	sys		=> $S,
-					event   => "Node Down",
-					element => "",
-					details => "Ping failed",
-					context => { type => "node" });
-}
-
 sub debug
 {
 	my (@msgs) = @_;
@@ -607,7 +634,6 @@ sub catch_zap
 	debug("I was killed by $sig");
 	logMsg("INFO daemon fpingd killed by $sig",
 				 do_not_lock => 1);
-	unlink $pidfile;
 }
 
 # this is a general-purpose reaper of zombies

@@ -60,9 +60,10 @@ my %hash = (
     'global_noevent_Description' => '',
     'global_noevent_ifType' => '',
 		'global_events_bandwidth' => 'true',
-    'uuid_add_with_node' => 'true',
     'uuid_namespace_type' => 'NameSpace_URL',
-    'uuid_namespace_name' => 'www.domain.com'
+    'uuid_namespace_name' => 'www.domain.com',
+
+		'node_name_rule' => qr/^[a-zA-Z0-9_. -]+$/, # note: rule MUST exclude '/'
   },
 
 	'system' => {
@@ -93,6 +94,8 @@ my %hash = (
 		# to have additional fields in the node summary data.
     'node_summary_field_list' => 'host,uuid,location,customer,businessService,serviceStatus,snmpdown,wmidown',
 
+		'polling_interval_factor' => 0.9, # fraction of the polling interval after which node is considered for next poll
+
 		'nmis_mthread' => 'false',
 		'nmis_maxthreads' => '10',
 
@@ -103,6 +106,7 @@ my %hash = (
     'cache_var_tables' => 'true',
     'page_refresh_time' => '300',
     'widget_refresh_time' => '180',
+		'graph_cache_maxage' => 120, # set to zero to disable graph caching
     'os_posix' => 'false',
     'os_cmd_read_file_reverse' => 'tac',
     'os_cmd_file_decompress' => 'gzip -d -c',
@@ -216,7 +220,7 @@ my %hash = (
 
   'files' => {
     'nmis' => '<cgi_url_base>/nmiscgi.pl',
-    'rrddraw' => '<cgi_url_base>/rrddraw.pl', #'rrddraw' => '<cgi_url_base>/opmantek_rrddraw.pl',
+    'rrddraw' => '<cgi_url_base>/rrddraw.pl',
     'network' => '<cgi_url_base>/network.pl',
     'node' => '<cgi_url_base>/node.pl',
     'ipsla' => '<cgi_url_base>/ipsla.pl',
@@ -504,6 +508,7 @@ my %hash = (
 		'purge_jsonlog_after' => 30*86400, # json log files
 		'purge_reports_after' => 365*86400,			 # html reports
 		'purge_outages_after' => 86400,					 # past non-recurring outages
+		'purge_graphcache_after' => 3600,				 # cached graph images
 	},
 
 	'gui' => {

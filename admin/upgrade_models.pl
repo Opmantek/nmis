@@ -29,7 +29,7 @@
 # *****************************************************************************
 #
 # this helper upgrades model files where safe to do so
-our $VERSION="8.6.6G";
+our $VERSION="8.6.7G";
 
 use strict;
 use Digest::MD5;								# good enough
@@ -164,7 +164,7 @@ sub compute_signature
 # model file, signatures for the last few releases are stored here
 __DATA__
 Common-ADSL.nmis 8c5779cf5faaf45a
-Common-Cisco-asset.nmis 675e126af3677a52
+Common-Cisco-asset.nmis eedb1042cf1c3b9c 675e126af3677a52
 Common-Cisco-cbqos.nmis e270054af44bc308
 Common-Cisco-cpu.nmis d0570e92ed3e4985
 Common-Cisco-macTable.nmis e503d0cbd7220f8f
@@ -173,7 +173,7 @@ Common-Cisco-neighbor.nmis 680e05322f63c24f
 Common-Cisco-netflow.nmis 33ad2b9786e1e4f4
 Common-Cisco-rtt.nmis 4df49293858fac3d 7cd3a757c422f5bd
 Common-Cisco-status.nmis f0c8c45368792ae1 c08e756f6ccd2fa8 5075457bccea2102
-Common-Cisco-temp.nmis 0eea6a6191e02701 83bd6bac56c7b7fb
+Common-Cisco-temp.nmis 459df2f60abd48b7 0eea6a6191e02701 83bd6bac56c7b7fb
 Common-Cisco-vlan.nmis 2e41983677ada8b7
 Common-Huawei-cbqos.nmis 58b9266692e45cae
 Common-Juniper-jnxCoS.nmis f2520160747fd14f
@@ -184,13 +184,13 @@ Common-Windows-system.nmis 57809a9258f320a4 aded8512fdc1a137
 Common-Windows-wmi.nmis dbc5c412d3fa5cb5 eae47688035b325d 75a6d5002bb1e851
 Common-asset.nmis f6c2fe2777c14437
 Common-calls.nmis 77ca79216fd1aefa
-Common-cbqos-in-nexus.nmis f5b4752af6beb6bd
+Common-cbqos-in-nexus.nmis ae383bace4a1566f f5b4752af6beb6bd
 Common-cbqos-in.nmis 68c58453714e91dc a0bbc467ffd18646 6c8df3ec0d0c0858
-Common-cbqos-out-nexus.nmis 70c5bdfbb3c17bf3
+Common-cbqos-out-nexus.nmis a6442955ad6fa8b4 70c5bdfbb3c17bf3
 Common-cbqos-out.nmis ab31ff8eee5db591 48665448110af552 1210e379c4b6a92d
-Common-database.nmis f5fde11eb5101a3f b3d083221e94f22c 8b309566ec783d52 6514b77ecc0dd2c8 5bacf781a1495ba5 a934b015029bbe63 a41276db67e9be61 92a7f5ebc9af25aa 5f1f1a8792f0498d b70fbcbf9e210596 1b1d1620e6b66683 5dbac9d4f0590b2c 2227e7b78b5547b4 e56cad8dc7066418 4bd336af049d4135 0cf0a876087bd7f2 b32bf11f5b860b3e 411a0d92a51a96a3 b2ff737dc0c025c1
+Common-database.nmis 122c407add4be823 b3d083221e94f22c 8b309566ec783d52 6514b77ecc0dd2c8 5bacf781a1495ba5 a934b015029bbe63 a41276db67e9be61 92a7f5ebc9af25aa 5f1f1a8792f0498d b70fbcbf9e210596 1b1d1620e6b66683 5dbac9d4f0590b2c 2227e7b78b5547b4 e56cad8dc7066418 4bd336af049d4135 0cf0a876087bd7f2 b32bf11f5b860b3e f5fde11eb5101a3f 411a0d92a51a96a3 b2ff737dc0c025c1
 Common-entityMib.nmis 23129c70d072e098
-Common-event.nmis 3c17ac2753efd729
+Common-event.nmis 5284eb931e6a5714 3c17ac2753efd729
 Common-heading.nmis 03e97ba31018fe04 dc1e5ee59839f42a 6b6ffeeb92a8996f fc120bc0906f3b70 7e458f0172e120ea 0f6d824494640deb 8e453ea283e3fd7a c1c8d886c4c7f7f1 4be5135841352538 a2c592a8fe826493 f652ed992cf8d4a2 087587a01227a79e 1c1c2e7cf3a0606c 5c37adf22c7f4ab4 c2bd5a05f75efac3 56bbc1eafea2ffbb e6e2c1a1df569f27
 Common-ifStack.nmis 273aabe064bfb46b
 Common-lldp.nmis e2d224fefdae20fb
@@ -200,7 +200,7 @@ Common-routing.nmis 1c9b0570350148f4 329d8897cefd7011 bef2fb4c73d5fec9
 Common-software.nmis b8a70318d469754b
 Common-stats.nmis 2f7157c230386ee2 efbcfd8340518376 14dd2080e99197df 051ad0c9af4e10ba 67a57e6c34135bc1 6094dfc29937dd19 17ac95f3a6a726cb
 Common-summary.nmis 10d878a1904ebb31
-Common-threshold.nmis d72ac1154c8b2264 2085498abd902193 5f00df141ba53a85 709aa976ce2acd85 42a0e451c9206d1a c787902cfc0496e9 306e9d25639e3af6 43500a40644ea0e6 a20ec1fe3d77e0a8
+Common-threshold.nmis 180eb2cd756c9b66 2085498abd902193 5f00df141ba53a85 709aa976ce2acd85 42a0e451c9206d1a c787902cfc0496e9 306e9d25639e3af6 43500a40644ea0e6 a20ec1fe3d77e0a8 d72ac1154c8b2264
 Graph-APCBattTemp.nmis 236bfec034b1269c de5f3206f3eeae68
 Graph-APCCapacity.nmis 67294b482fbb1e1f a243dadb1d7875dd
 Graph-APCCurrent.nmis 0c04f8bd2eaaeccd 907121ea0bcf9be0
@@ -437,7 +437,7 @@ Model-Accelar.nmis 7c09daabe4cd3f43 8063b383449c4fbd 473e4a629d6e7210
 Model-AlcatelASAM.nmis 05d31dc406b41af5 83e3f4595c6719e6 acda353c60ca0a18 d2d5d9b2142e1989 50c1fdaa738fb401
 Model-AlcatelASAMv2.nmis 60bd4fe058528bd8
 Model-Alcoma.nmis 750123d82f0525c1 363404f6741b1ab6 7716542b9fa6ba59
-Model-AristaSwitch.nmis 61521e62e243c3dc 56a548305c5cc437 d050d520cb81b95c
+Model-AristaSwitch.nmis 246662a74269c8c0 56a548305c5cc437 d050d520cb81b95c 61521e62e243c3dc
 Model-BTI-7000.nmis a359908ab5bdaddc 54fa2081ba36ff46
 Model-BTI-7800.nmis 7335b6cb886f60b8 e3da5cfdd3cba22c
 Model-BTI-OPS.nmis 1951ea24c83a6ab8 c8ce180bbb663559
@@ -461,11 +461,11 @@ Model-CiscoDSL.nmis 084b887d98e64682 374f511affd96c83 6ed6606e1f0ab42c 8e0d14738
 Model-CiscoDefault.nmis bceed295301338cf 4bc694b868f257b4
 Model-CiscoGeneric.nmis 7d766076ec3446ae 9f159c3f25a627b9 f589324fb67f9793
 Model-CiscoIOSXE.nmis fbe5563477ffdb80 72b549bdcc0804e9 0cb858418067430b 11f60115dd4cdfad e85f66570c90c7fd
-Model-CiscoIOSXR.nmis 50feb5a84dc20a4d e12b72b784ad1c5f 459049c58d8319dc 1754b6d20d61a74a c1d83637f22d1aea 71c999e29bc3b680 a1affb7cf1ae5495 3fb8ea566f34b6e4 8a531fb238516665 ac6cc4e079004be4
-Model-CiscoNXOS.nmis 2b60649213da9262 aeac57c06f2a8af6 5688a246aed01961 161ae6c49c6f1b3d a00d69038b17aa39 c80d009aa3d6cf1b 155625644907cfdc d80d5e84a5f55776 bc4df1a19cdd8e9b eabfe0a428f6aa5e 4faba51a761da835 b1111378863a7d68
+Model-CiscoIOSXR.nmis 5b2b16cc41d95d0e e12b72b784ad1c5f 459049c58d8319dc 1754b6d20d61a74a c1d83637f22d1aea 71c999e29bc3b680 a1affb7cf1ae5495 3fb8ea566f34b6e4 8a531fb238516665 50feb5a84dc20a4d ac6cc4e079004be4
+Model-CiscoNXOS.nmis 34955712baf7592f aeac57c06f2a8af6 5688a246aed01961 161ae6c49c6f1b3d a00d69038b17aa39 c80d009aa3d6cf1b 155625644907cfdc d80d5e84a5f55776 bc4df1a19cdd8e9b eabfe0a428f6aa5e 2b60649213da9262 4faba51a761da835 b1111378863a7d68
 Model-CiscoPIX.nmis 475b6fe16f5f55d4 59f330a515797f53
 Model-CiscoRouter.nmis f4cb68fb386f54c4 54e66e08f36229d9 83ff33224c7c63c0 1bd439a8e31cb653 0bc12598dda8c8a6 24ca17edafeae0b8 d552abe84ee95e51 06598a8a95e10b4e
-Model-CiscoVG.nmis bba37e84817dfed5
+Model-CiscoVG.nmis 7b596980452ce9c3 bba37e84817dfed5
 Model-Default-HC.nmis a8825ef25dbf4890 7d9ba9976f553b4b fbd901de4a88285a
 Model-Default.nmis f74f795c534ea46a 72f68603c0a271fe 4af750909edab9c8
 Model-EES.nmis 2f96a9629bc08555 811546e34d172b7c
@@ -494,9 +494,10 @@ Model-MW-HP-GbE2c.nmis 50645e1358f2ff62 5e57f9290870e2d8 50c4f4f3d4e2c364
 Model-MW-HP.nmis 32b3ed500d4c4a90 819a5ca08a073521 11c677ca4856af85
 Model-MW-Intel.nmis 5cafb6dfa62191ce deb74f6313ead88c c52e3076b8ff51dc
 Model-MW-Juniper.nmis 0ab8ebdf3e23a6c8 61b9fba4cb792f82 664d25120b038e46
-Model-MikroTik.nmis 8027b5c755f728e2 ff4009ac1488aab1 a353c76c562abc23 f8d9d7eb0925d15a 763ac63ebdf8f155 f5e69106f5b1cbc5 c2ac6bd4b9045cd3
+Model-MikroTik.nmis 3bb7ef6043685503 ff4009ac1488aab1 a353c76c562abc23 f8d9d7eb0925d15a 763ac63ebdf8f155 f5e69106f5b1cbc5 c2ac6bd4b9045cd3 8027b5c755f728e2
 Model-MikroTikRouter.nmis 6e7f5c821b5f15c7 afa45e050d9e2ad3
 Model-Mimosa.nmis 10672b91765dafdb 85bbe1cd540bdafd f96793bf3d691117
+Model-NetVanta.nmis d50913960c16d7f2
 Model-Netgear-GS108T.nmis caa1f22f37fe1652 a97b7d693220f705 324868d459b73597
 Model-Netgear-GS724T.nmis fc8bcdd017f3016a a4a0581c2c07b4bb 1454c0c9656baeb8
 Model-Netgear-Manual.nmis e50a79fc13613fa0 5efe06d9638880e3 a2412f592876f41f
@@ -506,6 +507,7 @@ Model-ONS15454.nmis 4831558a9668d56b 6546eb655567451f bb7ed270a661625a
 Model-OmniSwitch.nmis 95c870d2b7f0c439 858ae29f81cb4357 98c10c891ca47415 45ac9fe2f91bf84e
 Model-PaloAltoNetworks.nmis 2b0a5c3709bb9917 b3b7673a119b8680 14d93ccadfd65f0f ef2a3aa4669365c0
 Model-PingOnly.nmis 50ef2e6b894887b4
+Model-PulseSecure.nmis fe762e631540f136
 Model-QNAP.nmis f0bfacd519eeaaf9 54ca09a7da6d4d95 3fbd3e2fa514bf1d 19ec408694e5a14b
 Model-RadOptimux.nmis 97eb50a719a90945 ac1b50627cf3a86e 6b9949dc6c180ee6 aa0ffde7a6626880
 Model-RadwinWireless.nmis f06706f9701019a5 5b7a0e1baa408001 193dbf61b138b6a9 b05456b6497cdf07
@@ -529,4 +531,4 @@ Model-ZyXEL-GS.nmis 72f30722cd3e6665 b7eeb6155653a42b 8666c252de0c306b 15e94a542
 Model-ZyXEL-IES.nmis 25aaccabbd188208 593c69cbe0391cf3 0da840e65c219e00 3ab9322fece09797 4e5954eff8347757 7b098aa3c8afa7de
 Model-ZyXEL-MGS.nmis c3ea5aec5b903e8e bff9ef1e5d0a70d8 94ca1a1be8a5eeee 701cf09b9a9dae1e
 Model-net-snmp.nmis c9b5fa32bd1cd51f a78ed1067f7f14ab e321e3f8a79b25c0 13f1d8c3e10ebebc 997fc7bd3be516be 70491c897fe8d828 e106c9b396e76944 d24bab000b0a6fbe b4d10d3789afa1a6 5d97f9cf73a61919 b6518274fab46b78 aa24077be26e5897
-Model.nmis 8bd4ab3e997c6228 bece80b7b44d959b 34592112596682e2 a6443ed36ccd2120 c91082df42a88c17 fc6e00d8485d47c7 85b6e9852b359133 0b8ce0fbc6085bea fc31c4ba46c1f4be b8427208bee2fc4d 11d418a22fc2adfb 3c7c7f1471f80e2c efb216ab07a50fd0 d0c4c790f815e46a af53a22555c57f63 ba5cdf626ee516c1
+Model.nmis 8337a078c939fbe4 bece80b7b44d959b 34592112596682e2 a6443ed36ccd2120 c91082df42a88c17 fc6e00d8485d47c7 85b6e9852b359133 0b8ce0fbc6085bea fc31c4ba46c1f4be b8427208bee2fc4d 11d418a22fc2adfb 3c7c7f1471f80e2c efb216ab07a50fd0 d0c4c790f815e46a af53a22555c57f63 8bd4ab3e997c6228 ba5cdf626ee516c1

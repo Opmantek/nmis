@@ -48,6 +48,7 @@ use POSIX qw(:sys_wait_h);
 # this imports the LOCK_ *constants (eg. LOCK_UN, LOCK_EX), also the stat modes
 use Fcntl qw(:DEFAULT :flock :mode);
 use Errno qw(EAGAIN ESRCH EPERM);
+use Sys::Syslog qw(:standard :macros);
 
 use NMIS;
 use NMIS::Connect;
@@ -78,6 +79,7 @@ my $cmdargs = func::get_args_multi(@ARGV);
 my $starttime = Time::HiRes::time;
 my $C = loadConfTable(conf => $cmdargs->{conf}, debug=>$cmdargs->{debug}, info=>$cmdargs->{info});
 die "nmis cannot operate without config!\n" if (ref($C) ne "HASH");
+diag_log(LOG_INFO, "NMIS process started.");
 
 # and the status of the database dir, as reported by the selftest - 0 bad, 1 ok, undef unknown
 # this is used by rrdfunc::createRRD(), so needs to be scoped suitably.
@@ -99,11 +101,13 @@ if (-f $lockoutfile or getbool($C->{global_collect},"invert"))
 	}
 	my $selftest_cache = "$varsysdir/selftest";
 
+	diag_log(LOG_DEBUG, "Performing Selftest.");
 	my ($allok, $tests) = func::selftest(config => $C, delay_is_ok => 'false',
 																			 report_database_status => \$selftest_dbdir_status,
 																			 perms => 'false');
 	writeHashtoFile(file => $selftest_cache, json => 1,
 									data => { status => $allok, lastupdate => time, tests => $tests });
+	diag_log($allok? LOG_DEBUG: LOG_INFO, "Selftest completed ".($allok?"ok":"FAILED!"));
 	info("Selftest completed (status ".($allok?"ok":"FAILED!")."), cache file written");
 	if (-f $lockoutfile)
 	{
@@ -111,17 +115,22 @@ if (-f $lockoutfile or getbool($C->{global_collect},"invert"))
 		# installer should not need to lock this box for more than a few minutes
 		if (-f $installerpresence && (stat($installerpresence))[9] > time - 3600)
 		{
+			diag_log(LOG_INFO, "NMIS is currently disabled, installer is performing upgrade, exiting.");
 			logMsg("INFO NMIS is currently disabled, installer is performing upgrade, exiting.");
+
 			exit(0);
 		}
 		else
 		{
+			diag_log(LOG_WARNING, "NMIS is currently disabled! Remove the file $lockoutfile to re-enable.");
 			logMsg("WARNING NMIS is currently disabled! Remove the file $lockoutfile to re-enable.");
 			die "Attention: NMIS is currently disabled!\nRemove the file $lockoutfile to re-enable.\n\n";
 		}
 	}
 	else
 	{
+		diag_log(LOG_WARNING, "NMIS is currently disabled! Set the configuration variable \"global_collect\" to \"true\" to re-enable");
+
 		die "Attention: NMIS is currently disabled!\nSet the configuration variable \"global_collect\" to \"true\" to re-enable.\n\n";
 	}
 }
@@ -180,6 +189,7 @@ NMIS version $NMIS::VERSION
 / if $C->{debug} or $C->{info};
 
 
+diag_log(LOG_DEBUG, "Performing preliminary operations.");
 # the first thing we do is to upgrade up the event
 # data structure - it's a nop if it was already done.
 NMIS::upgrade_events_structure();
@@ -210,6 +220,8 @@ elsif ( $type eq "summary" )  {
 elsif ( $type eq "rme" ) { loadRMENodes($rmefile); }
 elsif ( $type eq "threshold" )
 {
+	diag_log(LOG_INFO, "Starting (independent) threshold operation");
+
 	my @cand = expand_candidate_list($nodeselect, $groupselect);
 	if (@cand)
 	{
@@ -219,6 +231,7 @@ elsif ( $type eq "threshold" )
 	{
 		runThreshold();
 	}
+	diag_log(LOG_INFO, "(independent) threshold operation finished");
 	printRunTime();
 }
 elsif ( $type eq "master" ) { nmisMaster(); printRunTime(); } # MIGHT be included in type=collect
@@ -227,9 +240,9 @@ elsif ( $type eq "purge" ) {
 	my $error = purge_files(); die "$error\n" if $error;
 	my $res = NMIS::purge_outages(); die "$res->error\n" if !$res->{success};
 }
-else { checkArgs(); }
+else { checkArgs(); exit 1; }
 
-exit;
+exit 0;
 
 #=========================================================================================
 
@@ -274,7 +287,7 @@ sub	runThreads
 	my $mthread = getbool($args{mthread});
 	my $mthreadDebug = getbool($args{mthreadDebug});
 
-	dbg("Starting, operation is $type");
+	diag_log(LOG_INFO, "Starting $type operation");
 
 	# returns empty list if unfiltered
 	my @candnodes = expand_candidate_list($args{nodeselect}, $args{groupselect});
@@ -407,6 +420,7 @@ sub	runThreads
 	{
 		die "Unknown operation type=$type, terminating!\n";
 	}
+
 	logMsg("INFO start of $type process");
 
 	# update the operation start/stop timestamp
@@ -513,37 +527,57 @@ sub	runThreads
 				push @todo_nodes, $maybe;
 				$whichflavours{$maybe}->{wmi} = $whichflavours{$maybe}->{snmp} = 1; # and ignore the last-xyz markers
 			}
-			# nodes that have not been pollable since forever: run at most once daily
-			# ...except if the demote_faulty_nodes config option is set to false
-			elsif (!$ninfo->{system}->{nodeModel} or $ninfo->{system}->{nodeModel} eq "Model")
+
+			# logic for dead node demotion/rate-limiting
+			# if demote_faulty_nodes config option is true, demote nodes that have
+			# not been pollable (or updatable) ever:
+			# after 14 days of normal attempts change to try at most once daily
+			elsif (
+				!getbool($C->{demote_faulty_nodes}, "invert")    # === ne false
+				&& (!$ninfo->{system}->{nodeModel} or $ninfo->{system}->{nodeModel} eq "Model" ) )
 			{
-				my $lasttry = $ninfo->{system}->{last_poll} // 0;
+				# this property gets updated on every attempt
+				my $lasttry = $ninfo->{system}->{ $type eq "collect" ?
+																							"last_poll_attempt" : "last_update_attempt" };
 
-				# try once every 5 minutes if demote_faulty_nodes is set to false,
-				# otherwise: was polling attempted at all and in the last 30 days? then once daily from
-				# that last try - otherwise try one now
-				my $nexttry = !getbool($C->{demote_faulty_nodes},"invert")? # === ne false
-						($lasttry && ($now - $lasttry) <= 30*86400)? ($lasttry + 86400 * 0.95) : $now : $lasttry + 300 ;
-
-				if ($nexttry <= $now)
+				my $graceperiod_start = $ninfo->{system}->{demote_grace};
+				# none set? then set one
+				if (!defined($graceperiod_start))
 				{
-					push @todo_nodes, $maybe;
-					$whichflavours{$maybe}->{wmi} = $whichflavours{$maybe}->{snmp} = 1;
+					$ninfo->{system}->{demote_grace} = $graceperiod_start = $now;
+					# and make sure the changed data is written out
+					writeTable(dir => 'var', name => lc("$maybe-node"), data => $ninfo);
 				}
-				# if demotion is enabled, log this pretty dire situation
-				# but not too noisily - with a default poll every minute this
-				# will log the issue once an hour.
-				elsif (!getbool($C->{demote_faulty_nodes},"invert")) # === ne false
+
+				# try only once a day if beyond the grace time, min of snmp/wmi/update policy otherwise;
+				my $normalperiod
+						= $type eq "collect"
+						? Statistics::Lite::min( $intervals{$polname}->{snmp}, $intervals{$polname}->{wmi} )
+						: $intervals{$polname}->{update};
+
+				# but do make sure to try a newly added node NOW!
+				my $fudgefactor = ($C->{polling_interval_factor} || 0.9);
+				my $nexttry = defined $lasttry? $lasttry
+						+ $fudgefactor * $normalperiod : $now;
+
+				if ($now - $graceperiod_start > 14 * 86400)
 				{
-					my $goodtimes = int((($now - $lasttry) % 3600) / 60);
-					my $msg = "Node $maybe has no valid nodeModel, never polled successfully, "
-							 . "demoted to frequency once daily, last attempt $lasttry, next $nexttry";
-					logMsg($msg) if ($goodtimes == 0);
-					dbg($msg);
+					$nexttry = ( $lasttry // $now) + 86400 * $fudgefactor;
+
+					logMsg( "Node $maybe has no valid nodeModel, never polled successfully, "
+									. "past demotion grace window (started at $graceperiod_start) so demoted to frequency once daily, last $type attempt $lasttry, next $nexttry" ) if ($debug);
 				}
 				else
 				{
-					dbg("Node $maybe has no valid nodeModel, never polled successfully. demote_faulty_nodes is disabled, last attempt $lasttry, next $nexttry.");
+					logMsg("Node $maybe has no valid nodeModel, never polled successfully, demote_faulty_nodes is on, grace window started at $graceperiod_start, last $type attempt "
+								 .($lasttry // "never").", next $nexttry." ) if ($debug);
+				}
+
+				if ( $nexttry <= $now )
+				{
+					push @todo_nodes, $maybe;
+					$whichflavours{$maybe}->{wmi} = $whichflavours{$maybe}->{snmp} = 1
+							if ( $type eq "collect" );
 				}
 			}
 			# logic for collect now or later: candidate if no past successful collect whatsoever,
@@ -569,10 +603,11 @@ sub	runThreads
 					dbg("Node $maybe is non-collecting, applying snmp policy to last check at $lastsnmp");
 				}
 
-				# accept delta-previous-now interval if it's at least 95% of the configured interval
+				# accept delta-previous-now interval if it's at least 90% of the configured interval
 				# strict 100% would mean that we might skip a full interval when polling takes longer
-				my $nextsnmp = ($lastsnmp // 0) + $intervals{$polname}->{snmp} * 0.95;
-				my $nextwmi = ($lastwmi // 0) + $intervals{$polname}->{wmi} * 0.95;
+				my $fudgefactor = $C->{polling_interval_factor} || 0.9;
+				my $nextsnmp = ($lastsnmp // 0) + $intervals{$polname}->{snmp} * $fudgefactor;
+				my $nextwmi = ($lastwmi // 0) + $intervals{$polname}->{wmi} * $fudgefactor;
 
 				# only flavours which worked in the past contribute to the now-or-later logic
 				if ((defined($lastsnmp) && $nextsnmp <= $now )
@@ -787,8 +822,9 @@ sub	runThreads
 			# not false
 			if (!getbool($C->{threshold_poll_cycle},"invert") )
 			{
-				dbg("Starting runThreshold (for all selected nodes)");
+				diag_log(LOG_INFO, "Starting post-collect threshold operation");
 				map { runThreshold($_) } (@candnodes);
+				diag_log(LOG_INFO, "post-collect threshold operation finished");
 			}
 			else
 			{
@@ -805,6 +841,10 @@ sub	runThreads
 		$D->{collect}{option} = 'gauge,0:U';
 		$D->{total}{value} = Time::HiRes::time() - $starttime;
 		$D->{total}{option} = 'gauge,0:U';
+
+		# OMK-4630 add nodecount to be saved, probably the following will work well
+		#$D->{nodecount}{value} = $nodecount;
+		#$D->{nodecount}{option} = 'gauge,0:U';
 
 		my $nr_processes = 1+ scalar %{&func::find_nmis_processes(config => $C)}; # current one isn't returned by find_nmis_processes
 		$D->{nr_procs} = { option => "gauge,0:U",
@@ -877,7 +917,7 @@ sub	runThreads
 
 	func::update_operations_stamp(type => $type, start => $starttime, stop => Time::HiRes::time());
 
-	dbg("Finished");
+	diag_log(LOG_INFO, "$type operation finished");
 	return;
 }
 
@@ -969,6 +1009,9 @@ sub doUpdate
 
 	my $NI = $S->ndinfo;
 	my $NC = $S->ndcfg;
+
+	# record that we are trying an update; last_update records only successfully completed updates...
+	$NI->{system}->{last_update_attempt} = Time::HiRes::time;
 
 	# look for any current outages with options.nostats set,
 	# and set a marker in nodeinfo so that updaterrd writes nothing but 'U'
@@ -1069,6 +1112,9 @@ sub doUpdate
 		}
 		$S->close; # close snmp session if one is open
 		$NI->{system}{last_update} = time();
+
+		# we updated something, so certainly outside of dead node demotion grace period
+		delete $NI->{system}->{demote_grace};
 	}
 
 	my $reachdata = runReach(sys=>$S, delayupdate => 1); # don't let it make the rrd update, we want to add updatetime!
@@ -1299,6 +1345,10 @@ sub doCollect
 	my $NI = $S->ndinfo;
 	my $NC = $S->ndcfg;
 	$S->readNodeView;  # s->init does NOT load that, but we need it as we're overwriting some view info
+
+	# record that we are trying a collect/poll;
+	# last_poll (and last_poll_wmi/snmp) only record successfully completed operations
+	$NI->{system}->{last_poll_attempt} = $starttime;
 
 	# look for any current outages with options.nostats set,
 	# and set a marker in nodeinfo so that updaterrd writes nothing but 'U'
@@ -1537,13 +1587,16 @@ sub runPing
 				 && ref($PT) eq "HASH")
 		{
 			# for multihomed nodes there are two records to check, keyed nodename:N
-			my @tocheck = (defined $NC->{node}->{host_backup}?
+			my @tocheck = ((defined($NC->{node}->{host_backup})
+											&& $NC->{node}->{host_backup})?
 										 grep($_ =~ /^$nodename:\d$/, keys %$PT)
 										 : $nodename);
 			for my $onekey (@tocheck)
 			{
-				if (ref($PT->{$onekey}) eq "HASH"
-						&& (time - $PT->{$onekey}->{lastping}) < $staleafter)	 # and not stale, 15 minutes seems ample
+				if (ref($PT->{$onekey}) eq "HASH" # present
+						&& defined($PT->{$onekey}->{lastping}) # and valid past data is a/v
+						&& defined($PT->{$onekey}->{nextping}) # and there's a working polling policy
+						&& (time - $PT->{$onekey}->{nextping}) < $staleafter) # and the daemon isn't too far behind with its work
 				{
 					# copy the fastping data...
 					($ping_min, $ping_avg, $ping_max, $ping_loss) = @{$PT->{$onekey}}{"min","avg","max","loss"};
@@ -2430,7 +2483,14 @@ sub getIntfInfo
 			info("Getting Device IP Address Table");
 			if ( $ifAdEntTable = $SNMP->getindex('ipAdEntIfIndex')) {
 				if ( $ifMaskTable = $SNMP->getindex('ipAdEntNetMask')) {
-					foreach my $addr (keys %{$ifAdEntTable}) {
+					foreach my $addr (keys %{$ifAdEntTable})
+					{
+						if ($ifMaskTable->{$addr} eq "255.255.255.255"
+								&& $IF->{$ifAdEntTable->{$addr}}->{ifDescr} !~ /loopback/i)
+						{
+							info("SKIPPING HSRP Addr on $IF->{$ifAdEntTable->{$addr}}{ifDescr} :: ifIndex=$ifAdEntTable->{$addr}, addr=$addr  mask=$ifMaskTable->{$addr}");
+							next;
+						}
 						my $index = $ifAdEntTable->{$addr};
 						next if ($singleInterface and $intf_one ne $index);
 						$ifCnt{$index} += 1;
@@ -3290,6 +3350,22 @@ sub getSystemHealthInfo
 			{
 				dbg("section=$section index=$index_var, found value=$indexvalue");
 
+				# allow disabling of collection for this instance,
+				# based on regex match against the index value
+				if (ref($thissection->{nocollect}) eq "HASH"
+						&& defined($thissection->{nocollect}->{$index_var}))
+				{
+					# this supports both 'nocollect' => { 'first' => qr/somere/i, 'second' => 'plaintext' }
+					my $rex = ref($thissection->{nocollect}->{$index_var}) eq "Regexp"?
+							$thissection->{nocollect}->{$index_var} : qr/$thissection->{nocollect}->{$index_var}/;
+
+					if ($indexvalue =~ $rex)
+					{
+						dbg("nocollect match for systemHealth section=$section key=$index_var value=$indexvalue - skipping");
+						next;
+					}
+				}
+
 				# save the seen index value
 				$NI->{$section}->{$indexvalue}->{$index_var} = $indexvalue;
 
@@ -3322,10 +3398,27 @@ sub getSystemHealthInfo
 					if ( $oid =~ /$index_regex/ ) {
 						$index = $1;
 					}
-					$healthIndexNum{$index}=$index;
-					dbg("section=$section index=$index is found, value=$healthIndexTable->{$oid}");
 
-					$NI->{$section}->{$index}->{$index_var} = $healthIndexTable->{$oid};
+					my $indexvalue = $healthIndexNum{$index} = $index;
+					dbg("section=$section index=$index is found, value=$indexvalue");
+
+					# allow disabling of collection for this instance,
+					# based on regex match against the index value
+					if (ref($thissection->{nocollect}) eq "HASH"
+							&& defined($thissection->{nocollect}->{$index_var}))
+					{
+						# this supports both 'nocollect' => { 'first' => qr/somere/i, 'second' => 'plaintext' }
+						my $rex = ref($thissection->{nocollect}->{$index_var}) eq "Regexp"?
+								$thissection->{nocollect}->{$index_var} : qr/$thissection->{nocollect}->{$index_var}/;
+
+						if ($indexvalue =~ $rex)
+						{
+							dbg("nocollect match for systemHealth section=$section key=$index_var value=$indexvalue - skipping");
+							next;
+						}
+					}
+
+					$NI->{$section}->{$index}->{$index_var} = $indexvalue;
 				}
 			}
 			else
@@ -3494,8 +3587,8 @@ sub updateNodeInfo
 	# save what we need now for check of this node
 	my $sysObjectID = $NI->{system}{sysObjectID};
 	my $ifNumber = $NI->{system}{ifNumber};
-	my $sysUpTimeSec = $NI->{system}{sysUpTimeSec};
-	my $sysUpTime = $NI->{system}{sysUpTime};
+	my $sysUpTimeSec = $NI->{system}{sysUpTimeSec}; # seconds
+	my $sysUpTime = $NI->{system}{sysUpTime};				# text like "8 days, 22:01:51"
 
 	# this returns 0 iff none of the possible/configured sources worked, sets details
 	my $loadsuccess = $S->loadInfo(class=>'system', model=>$model);
@@ -3579,19 +3672,29 @@ sub updateNodeInfo
 			$V->{system}{snmpUpTime_value} = $NI->{system}{snmpUpTime};
 			$V->{system}{snmpUpTime_title} = 'SNMP Uptime';
 		}
-
 		info("sysUpTime: Old=$sysUpTime New=$NI->{system}{sysUpTime}");
-		if ($NI->{system}->{sysUpTimeSec} && $sysUpTimeSec > $NI->{system}{sysUpTimeSec})
-		{
-			info("NODE RESET: Old sysUpTime=$sysUpTimeSec New sysUpTime=$NI->{system}{sysUpTimeSec}");
-			notify(sys=>$S, event=>"Node Reset",
-						 element=>"",
-						 details => "Old_sysUpTime=$sysUpTime New_sysUpTime=$NI->{system}{sysUpTime}",
-						 context => { type => "node" } );
 
-			# now stash this info in the node info object, to ensure we insert ONE set of U's into the rrds
-			# so that no spikes appear in the graphs
-			$NI->{admin}->{node_was_reset}=1;
+		# has that node really been reset or has the uptime counter wrapped at 497 days and change?
+		# sysUpTime is in 0.01s timeticks and 32 bit wide, so 497.1 days is all it can hold
+		my $newuptime = $NI->{system}->{sysUpTimeSec};
+		if ($newuptime && $sysUpTimeSec > $newuptime)
+		{
+			if ($sysUpTimeSec >= 496*86400) # ie. old uptime value within one day of the rollover
+			{
+				logMsg("INFO ($NI->{system}{name}) sysUpTime has wrapped after 497 days");
+			}
+			else
+			{
+				info("NODE RESET: Old sysUpTime=$sysUpTimeSec New sysUpTime=$newuptime");
+				notify(sys=>$S, event=>"Node Reset",
+							 element=>"",
+							 details => "Old_sysUpTime=$sysUpTime New_sysUpTime=$newuptime",
+							 context => { type => "node" } );
+
+				# now stash this info in the node info object, to ensure we insert ONE set of U's into the rrds
+				# so that no spikes appear in the graphs
+				$NI->{admin}->{node_was_reset}=1;
+			}
 		}
 
 		$V->{system}{sysUpTime_value} = $NI->{system}{sysUpTime};
@@ -3600,6 +3703,9 @@ sub updateNodeInfo
 		$V->{system}{lastUpdate_value} = returnDateStamp();
 		$V->{system}{lastUpdate_title} = 'Last Update';
 		$NI->{system}{last_poll} = $time_marker;
+
+		# we polled something, so outside of dead node demotion grace period
+		delete $NI->{system}->{demote_grace};
 
 		# get and apply any nodeconf override if such exists for this node
 		my $node = $NI->{system}{name};
@@ -4259,9 +4365,13 @@ sub getCBQoSdata
 						return undef;
 					}
 
+					# fix the debug for Cisco Nexus which only has post policy.
+					my $byte = defined $D->{'PrePolicyByte'}{value} ? $D->{'PrePolicyByte'}{value} : $D->{'PostPolicyByte'}{value};
+					my $pkts = defined $D->{'PrePolicyPkt'}{value} ? $D->{'PrePolicyPkt'}{value} : $D->{'PostPolicyPkt'}{value};
+
 					# oke, store the data
-					dbg("bytes transfered $D->{'PrePolicyByte'}{value}, bytes dropped $D->{'DropByte'}{value}");
-					dbg("packets transfered $D->{'PrePolicyPkt'}{value}, packets dropped $D->{'DropPkt'}{value}");
+					dbg("bytes transfered $byte, bytes dropped $D->{'DropByte'}{value}");
+					dbg("packets transfered $pkts, packets dropped $D->{'DropPkt'}{value}");
 					dbg("packets dropped no buffer $D->{'NoBufDropPkt'}{value}");
 					#
 					# update RRD
@@ -4295,6 +4405,7 @@ sub getCBQoSwalk
 	my %args = @_;
 	my $S = $args{sys};
 	my $NI = $S->ndinfo;
+	my $M = $S->mdl;
 
 	if (!$S->status->{snmp_enabled})
 	{
@@ -4358,7 +4469,7 @@ sub getCBQoSwalk
 
 					# the OID will be 1.3.6.1.4.1.9.9.166.1.5.1.1.2.$PIndex.$OIndex = Gauge
 				BLOCK2:
-					foreach my $OIndex (keys %{$qosIndexTable}) {
+					foreach my $OIndex (sort keys %{$qosIndexTable}) {
 						# look for the Object type for each
 						($answer->{'cbQosObjectsType'}) = $SNMP->getarray("cbQosObjectsType.$PIndex.$OIndex");
 						dbg("look for object at $PIndex.$OIndex, type $answer->{'cbQosObjectsType'}");
@@ -4428,8 +4539,12 @@ sub getCBQoSwalk
 									next BLOCK2; # skip this class-map, is part of a match statement
 								}
 								# concatenate names
-								if ($answer->{'cbQosParentObjectsIndex2'} ne 0) {
-									$answer->{'cbQosCMName'} = "$answer->{'cbQosName'}--$answer->{'cbQosCMName'}";
+								if ($answer->{'cbQosParentObjectsIndex2'} ne 0)
+								{
+									# OMK-5182, customer wants / as delimiter, not our default --
+									$answer->{'cbQosCMName'} = join( ($C->{cbqos_classmap_name_delimiter} // "--"),
+																									 $answer->{'cbQosName'},
+																									 $answer->{'cbQosCMName'});
 								}
 							}
 
@@ -4455,9 +4570,32 @@ sub getCBQoSwalk
 								$CMRate = $answer->{'cbQosQueueingCfgBandwidth'} * $inoutIfSpeed/100;
 							}
 							if ($CMRate eq 0) { $CMRate = "undef"; }
+
+							# if this is Nexus we want to use one of the queuing classes for getting the data.
+							# how do we select the right class?
+							#$CMValues{"H".$OIndex}{'CMIndex'} = $OIndex ;
+							my $thing = "cbqos-$direction";
+							if ( defined $M->{$thing}->{rrd}->{$thing}{nexus} and getbool($M->{$thing}->{rrd}->{$thing}{nexus}) ) {
+								$answer->{'cbQosQueueingCurrentQDepth'} = undef;
+								$answer->{'cbQosQueueingCurrentQDepthPkt'} = undef;
+								($answer->{'cbQosQueueingCurrentQDepth'},$answer->{'cbQosQueueingCurrentQDepthPkt'}) = $SNMP->getarray("1.3.6.1.4.1.9.9.166.1.18.1.1.1.$PIndex.$OIndex","1.3.6.1.4.1.9.9.166.1.18.1.1.9.$PIndex.$OIndex");
+
+								# lets just get the first one we find.
+								if ( defined $answer->{'cbQosQueueingCurrentQDepth'}
+									and $answer->{'cbQosQueueingCurrentQDepth'} ne ""
+									and not defined $CMValues{"H".$answer->{'cbQosParentObjectsIndex'}}{'QIndex'}
+								) {
+									dbg("nexus queuing class found $OIndex using this class for data collection not the class map");
+									$CMValues{"H".$answer->{'cbQosParentObjectsIndex'}}{'CMIndex'} = $OIndex ;
+									$CMValues{"H".$answer->{'cbQosParentObjectsIndex'}}{'QIndex'} = $OIndex ;
+								}
+								dbg("nexus debug $OIndex cbQosQueueingCurrentQDepth=$answer->{'cbQosQueueingCurrentQDepth'}");
+							}
+
+							$CMValues{"H".$answer->{'cbQosParentObjectsIndex'}}{'CMCfgRate'} = $CMRate;
 							dbg("queueing - bandwidth $answer->{'cbQosQueueingCfgBandwidth'}, units $answer->{'cbQosQueueingCfgBandwidthUnits'},".
 									"rate $CMRate, parent ID $answer->{'cbQosParentObjectsIndex'}");
-							$CMValues{"H".$answer->{'cbQosParentObjectsIndex'}}{'CMCfgRate'} = $CMRate ;
+
 						} elsif ($answer->{'cbQosObjectsType'} eq 6) {
 							# traffic shaping
 							($answer->{'cbQosTSCfgRate'},$answer->{'cbQosParentObjectsIndex'})
@@ -4495,6 +4633,7 @@ sub getCBQoSwalk
 
 							$cbQosTable{$intf}{$direction}{'ClassMap'}{$index}{'Name'} = $CMValues{$index}{'CMName'};
 							$cbQosTable{$intf}{$direction}{'ClassMap'}{$index}{'Index'} = $CMValues{$index}{'CMIndex'};
+							$cbQosTable{$intf}{$direction}{'ClassMap'}{$index}{'QIndex'} = $CMValues{$index}{'QIndex'} if defined $CMValues{$index}{'QIndex'};
 
 							# lets print the just type
 							if (exists $CMValues{$index}{'CMCfgRate'}) {
@@ -6101,7 +6240,7 @@ sub runAlerts
 					if ( defined($CA->{$sect}{$alrt}{control}) and $CA->{$sect}{$alrt}{control} ne '' ) {
 						my $control_result = $S->parseString(string=>"($CA->{$sect}{$alrt}{control}) ? 1:0",
 																								 index=>$index, type=>$sect, sect=>$sect);
-						dbg("control_result sect=$sect index=$index control_result=$control_result");
+						dbg("control_result event=$CA->{$sect}{$alrt}{event} sect=$sect index=$index control_result=$control_result");
 						next if not $control_result;
 					}
 
@@ -7032,11 +7171,15 @@ sub nmisSummary
 {
 	my %args = @_;
 
+	diag_log(LOG_INFO, "starting summary operation");
+
 	# check that there are no other running/stuck/delayed summary processes
 	my $others = func::find_nmis_processes(config => $C,
 																				 type => 'summary');
 	if (keys %$others)
 	{
+		diag_log(LOG_ERR, "other type=summary processes running ("
+						 .join(", ", keys %$others)."), aborting operation.");
 		logMsg("ERROR other type=summary processes running (".join(", ", keys %$others)."), aborting operation.");
 		info("ERROR other type=summary processes running (".join(", ", keys %$others)."), aborting operation.");
 		return;
@@ -7045,7 +7188,7 @@ sub nmisSummary
 
 	my $pollTimer = NMIS::Timing->new;
 
-	dbg("Calculating NMIS network stats for cgi cache");
+
 	func::update_operations_stamp(type => "summary", start => $starttime, stop => undef)
 			if ($type eq "summary");	# not if part of collect
 
@@ -7064,7 +7207,6 @@ sub nmisSummary
 	my $NS = getNodeSummary(C => $C);
 	my $file = "nmis-nodesum";
 	writeTable(dir=>'var',name=>$file,data=>$NS);
-	dbg("Finished calculating NMIS network stats for cgi cache - wrote $k nodes");
 	func::update_operations_stamp(type => "summary", start => $starttime, stop => Time::HiRes::time())
 			if ($type eq "summary");	# not if part of collect
 
@@ -7072,6 +7214,8 @@ sub nmisSummary
 		my $polltime = $pollTimer->elapTime();
 		logMsg("Poll Time: $polltime");
 	}
+
+	diag_log(LOG_INFO, "summary operation finished");
 }
 
 sub summaryCache
@@ -7132,6 +7276,8 @@ sub runEscalate
 	my %args = @_;
 	my $C = loadConfTable();
 
+	diag_log(LOG_INFO, "Starting escalate operation");
+
 	if (getbool($args{independent}))
 	{
 		# check that there are no other running/stuck/delayed escalate processes
@@ -7139,6 +7285,8 @@ sub runEscalate
 																					 type => 'escalate');
 		if (keys %$others)
 		{
+			diag_log(LOG_ERR, "other type=escalate processes running (".join(", ", keys %$others)."), aborting operation.");
+
 			logMsg("ERROR other type=escalate processes running (".join(", ", keys %$others)."), aborting operation.");
 			info("ERROR other type=escalate processes running (".join(", ", keys %$others)."), aborting operation.");
 			return;
@@ -7177,7 +7325,6 @@ sub runEscalate
 	my $serial_ns = 0;
 	my %seen;
 
-	dbg("Starting");
 	func::update_operations_stamp(type => "escalate", start => $starttime, stop => undef)
 			if ($type eq "escalate");	# not if part of collect
 	# load Contacts table
@@ -7974,9 +8121,7 @@ LABEL_ESC:
 		}
 	}
 
-	# Cologne, send the messages now
 	sendMSG(data=>\%msgTable);
-	dbg("Finished");
 	if ( defined $C->{log_polling_time} and getbool($C->{log_polling_time})) {
 		my $polltime = $pollTimer->elapTime();
 		logMsg("Poll Time: $polltime");
@@ -7985,6 +8130,8 @@ LABEL_ESC:
 																start => $starttime,
 																stop => Time::HiRes::time())
 			if ($type eq "escalate");	# not if part of collect
+
+	diag_log(LOG_INFO, "escalate operation finished");
 } # end runEscalate
 
 #=========================================================================================
@@ -8178,11 +8325,15 @@ sub runMetrics
 	my %args = @_;
 	my $S = $args{sys};
 
+	diag_log(LOG_INFO, "Starting metrics operation");
+
 	# check that there are no other running/stuck/delayed summary processes
 	my $others = func::find_nmis_processes(config => $C,
 																				 type => 'metrics');
 	if (keys %$others)
 	{
+		diag_log(LOG_ERR, "other type=metrics processes running ("
+						 .join(", ", keys %$others)."), aborting operation.");
 		logMsg("ERROR other type=metrics processes running (".join(", ", keys %$others)."), aborting operation.");
 		info("ERROR other type=metrics processes running (".join(", ", keys %$others)."), aborting operation.");
 		return;
@@ -8207,7 +8358,7 @@ sub runMetrics
 
 	my $pollTimer = NMIS::Timing->new;
 
-	dbg("Starting");
+
 
 	# Doing the whole network - this defaults to -8 hours span
 	my $groupSummary = getGroupSummary();
@@ -8262,10 +8413,11 @@ sub runMetrics
 			logMsg("ERROR updateRRD failed: ".getRRDerror());
 		}
 	}
-	dbg("Finished");
+
 
 	logMsg("Poll Time: ". $pollTimer->elapTime()) if ( defined $C->{log_polling_time} and getbool($C->{log_polling_time}));
 
+	diag_log(LOG_INFO, "metrics operation finished");
 } # end runMetrics
 
 
@@ -8287,7 +8439,7 @@ sub runLinks
 		return;
 	}
 
-	dbg("Start");
+	diag_log(LOG_INFO, "Starting links operation");
 
 	if (!($II = loadInterfaceInfo())) {
 		logMsg("ERROR reading all interface info");
@@ -8422,7 +8574,7 @@ sub runLinks
 	}
 	logMsg("Check table Links and update link names and other entries");
 
-	dbg("Finished");
+	diag_log(LOG_INFO,"links operation finished");
 }
 
 
@@ -8447,8 +8599,10 @@ sub runDaemons
 	my $pt = new Proc::ProcessTable();
 	foreach my $pentry (@{$pt->table})
 	{
-		# fpingd is identifyable only by cmdline
-		$fpingd_found = 1 if ($pentry->cmndline =~ $C->{daemon_fping_filename});
+		# fpingd is identifyable only by cmdline,
+		# and only strict equality is ok or we might misinterpret wrappers like
+		# sudo ./bin/fpingd.pl, or ps ax|fgrep fpingd...
+		$fpingd_found = 1 if ($pentry->cmndline eq $C->{daemon_fping_filename});
 		$ipslad_found = 1 if ($pentry->fname eq $C->{daemon_ipsla_filename});
 		last if ($fpingd_found && $ipslad_found);
 	}
@@ -8503,6 +8657,8 @@ sub checkConfig
 	my %args = @_;
 	my $change = $args{change};
 	my $audit = $args{audit};
+
+	diag_log(LOG_INFO, "Starting ".($audit?"audit":"config")." operation");
 
 	my $ext = getExtension(dir=>'conf');
 
@@ -8669,6 +8825,7 @@ sub checkConfig
 	convertConfFiles();
 
 	info(" Continue with bin/nmis.pl type=apache for configuration rules of the Apache web server\n");
+	diag_log(LOG_INFO, ($audit?"audit":"config")." operation finished")
 }
 
 
@@ -8713,8 +8870,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 22 8 * * * $usercol $C->{'<nmis_base>'}/admin/config_backup.pl $C->{'<nmis_backups>'} 30
 
 ######################################################
-# purge old files every few days
-2 2 */3 * * $usercol $C->{'<nmis_base>'}/bin/nmis.pl type=purge
+# purge old files frequently
+27 * * * * $usercol $C->{'<nmis_base>'}/bin/nmis.pl type=purge
 
 ######################################################
 # Save the Reports, Daily Monthly Weekly
@@ -8741,14 +8898,14 @@ sub printApache24
 # NMIS Aliases for static files:
 Alias $C->{'<url_base>'} "$C->{web_root}"
 <Directory "$C->{web_root}">
-  Options Indexes FollowSymLinks MultiViews
+  Options FollowSymLinks MultiViews
 	AllowOverride None
   Require all granted
 </Directory>
 
 Alias $C->{'<menu_url_base>'}/ "$C->{'<nmis_menu>'}/"
 <Directory "$C->{'<nmis_menu>'}">
-  Options Indexes FollowSymLinks MultiViews
+  Options FollowSymLinks MultiViews
   AllowOverride None
   Require all granted
 </Directory>
@@ -8834,7 +8991,7 @@ sub printApache
 
 Alias $C->{'<url_base>'} "$C->{web_root}"
 <Directory "$C->{web_root}">
-		Options Indexes FollowSymLinks MultiViews
+		Options FollowSymLinks MultiViews
 		AllowOverride None
 		Order allow,deny
 		Allow from all
@@ -8842,7 +8999,7 @@ Alias $C->{'<url_base>'} "$C->{web_root}"
 
 Alias $C->{'<menu_url_base>'}/ "$C->{'<nmis_menu>'}/"
 <Directory "$C->{'<nmis_menu>'}">
-		Options Indexes FollowSymLinks MultiViews
+		Options FollowSymLinks MultiViews
 		AllowOverride None
 		Order allow,deny
 		Allow from all
@@ -8951,13 +9108,7 @@ sub runThreshold
 	# check global_threshold not explicitely set to false
 	if (!getbool($C->{global_threshold},"invert"))
 	{
-		my $node_select;
-		if ($node)
-		{
-			die "Invalid node=$node: No node of that name\n"
-					if (!($node_select = checkNodeName($node)));
-		}
-		doThreshold(name=>$node_select, table => doSummaryBuild(name => $node_select));
+		doThreshold(name=>$node, table => doSummaryBuild(name => $node));
 	}
 	else
 	{
@@ -9085,10 +9236,13 @@ sub doSummaryBuild
 					next unless getbool($IF->{$index}{collect});
 					my $sts = getSummaryStats(sys=>$S, type=>$tp,
 																		start=>$threshold_period, end=>time(), index=>$index);
-					foreach (keys %{$sts->{$index}}) { $stats{$nd}{interface}{$index}{$_} = $sts->{$index}{$_}; } # save for threshold
-
-					# copy all stats into the stsintf info.
-					foreach (keys %{$sts->{$index}}) { $stsintf{"${index}.$S->{name}"}{$_} = $sts->{$index}{$_}; }
+					foreach (keys %{$sts->{$index}})
+					{
+						# save for threshold
+						$stats{$nd}{interface}{$index}{$_} = $sts->{$index}{$_};
+						# get all the stats fields into the stts info.
+						$stsintf{"${index}.$S->{name}"}{$_} = $sts->{$index}{$_};
+					}
 				}
 			}
 		}
@@ -9120,7 +9274,6 @@ sub doThreshold
 	my $sts = $args{table}; # pointer to data built up by doSummaryBuild
 	my $S = $args{sys};
 
-	dbg("Starting");
 	func::update_operations_stamp(type => "threshold", start => $starttime, stop => undef)
 			if ($type eq "threshold");	# not if part of collect
 	my $pollTimer = NMIS::Timing->new;
@@ -9331,7 +9484,6 @@ sub doThreshold
 		$S->writeNodeInfo() if ($type eq "threshold");
 	}
 
-	dbg("Finished");
 	if ( defined $C->{log_polling_time} and getbool($C->{log_polling_time}))
 	{
 		my $polltime = $pollTimer->elapTime();
@@ -9773,6 +9925,13 @@ sub purge_files
 	info("Starting to look for purgable files");
 	# config option, extension, where to look...
 	my @purgatory = (
+		{ ext => qr/\.png$/,
+			minage => $C->{purge_graphcache_after} || 3600,
+			location => "$C->{web_root}/cache",
+			also_empties => 1,
+			description => "Old Graph Images",
+		},
+
 		{ ext => qr/\.rrd$/,
 			minage => $C->{purge_rrd_after} || 30*86400,
 			location => $C->{database_root},
@@ -9937,6 +10096,20 @@ sub makesysuptime
 	return;
 }
 
+# log diagnostic message to local syslog, if syslog_diag_facility is configured
+# args: priority (text or constant, ie. 'info' or LOG_DEBUG),
+#  message; both required.
+# returns: nothing
+sub diag_log
+{
+	my ($priority, $message) = @_;
+
+	if (my $facility = $C->{syslog_diag_facility})
+	{
+		openlog("nmis", "ndelay,pid,nofatal", $facility);
+		syslog($priority, $message);
+	}
+}
 
 # *****************************************************************************
 # Copyright (C) Opmantek Limited (www.opmantek.com)
