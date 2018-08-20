@@ -332,7 +332,7 @@ sub selectMetrics
 		if (-f $cachefile)
 		{
 			my $selfteststatus = readFiletoHash(file => $cachefile, json => 'true');
-			if (!$selfteststatus->{status})
+			if ($selfteststatus && !$selfteststatus->{status})
 			{
 				$showmetrics=0;
 
@@ -1350,12 +1350,15 @@ sub viewSelfTest
 	{
 		my $cachefile = func::getFileName(file => $C->{'<nmis_var>'}."/nmis_system/selftest",
 																			json => 'true');
-		if (-f $cachefile)
-		{
-			my $selfteststatus = readFiletoHash(file => $cachefile, json => 'true');
 
-			print header($headeropts);
+		my $selfteststatus = readFiletoHash(file => $cachefile, json => 'true') 		if (-f $cachefile);
+		
+		print header($headeropts);
+
+		if ($selfteststatus)
+		{
 			pageStartJscript(title => "NMIS Selftest - $C->{server_name}") if (!$wantwidget);
+			
 			print start_table({class=>'dash'}),
 			Tr(th({class=>'title',colspan=>'2'},"NMIS Selftest")),
 			Tr(td({class=>"heading3"}, "Last Selftest"), td({class=>"rht Plain"},
